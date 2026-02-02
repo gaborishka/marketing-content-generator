@@ -7,7 +7,8 @@ import {
   Maximize2,
   CheckCircle2,
   XCircle,
-  MessageSquare
+  MessageSquare,
+  Loader2
 } from 'lucide-react';
 import { GeneratedContent } from '../types';
 
@@ -28,6 +29,55 @@ export const CanvasCard: React.FC<CanvasCardProps> = ({
   onEdit, 
   onDelete 
 }) => {
+  // Render Loading State
+  if (content.status === 'generating') {
+    return (
+      <div
+        className="absolute flex flex-col bg-white rounded-xl shadow-sm border border-slate-200 z-10 overflow-hidden"
+        style={{
+          left: content.x,
+          top: content.y,
+          width: content.width || 320,
+          transformOrigin: '0 0',
+          cursor: 'wait'
+        }}
+      >
+        {/* Animated Progress Bar */}
+        <div className="h-1 w-full bg-slate-100 overflow-hidden">
+          <div className="h-full bg-blue-500 w-1/2 animate-[progress_1s_ease-in-out_infinite] origin-left" style={{ animation: 'pulse 1.5s cubic-bezier(0.4, 0, 0.6, 1) infinite' }}></div>
+        </div>
+        
+        {/* Skeleton Header */}
+        <div className="flex items-center justify-between p-3 border-b border-slate-100 bg-slate-50/50">
+          <div className="flex items-center space-x-2">
+            <div className="w-2 h-2 rounded-full bg-slate-300 animate-pulse" />
+            <div className="h-3 w-16 bg-slate-200 rounded animate-pulse" />
+          </div>
+          <Loader2 size={14} className="text-blue-500 animate-spin" />
+        </div>
+
+        {/* Skeleton Body */}
+        <div className="relative aspect-video bg-slate-100 animate-pulse flex items-center justify-center">
+           <div className="text-slate-300 text-xs font-medium">Generating Asset...</div>
+        </div>
+
+        <div className="p-4 space-y-3">
+          <div className="h-3 w-24 bg-slate-200 rounded animate-pulse" />
+          <div className="space-y-2">
+            <div className="h-2 w-full bg-slate-200 rounded animate-pulse" />
+            <div className="h-2 w-5/6 bg-slate-200 rounded animate-pulse" />
+            <div className="h-2 w-4/6 bg-slate-200 rounded animate-pulse" />
+          </div>
+          <div className="pt-2 flex justify-between">
+             <div className="h-4 w-16 bg-slate-200 rounded animate-pulse" />
+             <div className="h-4 w-8 bg-slate-200 rounded animate-pulse" />
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Render Standard Card
   return (
     <div
       className={`absolute flex flex-col bg-white rounded-xl shadow-sm transition-shadow duration-200 select-none group ${

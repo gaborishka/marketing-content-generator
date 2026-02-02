@@ -149,6 +149,10 @@ function App() {
     setContentStore([...positionedContent, ...contentStore]);
   };
 
+  const handleCampaignUpdate = (updatedCampaign: Campaign) => {
+    setCampaigns(prev => prev.map(c => c.id === updatedCampaign.id ? updatedCampaign : c));
+  };
+
   return (
     <Router>
       <Layout>
@@ -172,6 +176,7 @@ function App() {
                 products={products}
                 contentStore={contentStore}
                 onUpdateContent={setContentStore}
+                onUpdateCampaign={handleCampaignUpdate}
               />
             } 
           />

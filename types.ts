@@ -44,7 +44,7 @@ export interface GeneratedContent {
   text: string;
   imageUrl?: string;
   complianceScore: number;
-  status: 'draft' | 'approved' | 'rejected';
+  status: 'draft' | 'approved' | 'rejected' | 'generating';
   riskLevel: 'low' | 'medium' | 'high';
   // Canvas specific properties
   x: number;
