@@ -1,0 +1,5 @@
+{
+  "name": "Marketing Content Generator",
+  "description": "An enterprise-grade AI marketing content generator featuring campaign management, product catalogs, and compliance-aware content generation powered by Gemini.",
+  "requestFramePermissions": []
+}

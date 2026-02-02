@@ -1,0 +1,133 @@
+import React, { useState } from 'react';
+import { 
+  LayoutDashboard, 
+  Megaphone, 
+  Package, 
+  Settings, 
+  Menu, 
+  Bell, 
+  User, 
+  LogOut,
+  Sparkles
+} from 'lucide-react';
+import { Link, useLocation } from 'react-router-dom';
+
+interface LayoutProps {
+  children: React.ReactNode;
+}
+
+const SidebarItem = ({ icon: Icon, label, path, active }: { icon: any, label: string, path: string, active: boolean }) => (
+  <Link 
+    to={path} 
+    className={`flex items-center space-x-3 px-4 py-3 rounded-lg transition-colors mb-1 ${
+      active 
+        ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/30' 
+        : 'text-slate-400 hover:bg-slate-800 hover:text-white'
+    }`}
+  >
+    <Icon size={20} />
+    <span className="font-medium">{label}</span>
+  </Link>
+);
+
+export const Layout: React.FC<LayoutProps> = ({ children }) => {
+  const location = useLocation();
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+
+  return (
+    <div className="flex h-screen bg-slate-50 overflow-hidden">
+      {/* Sidebar */}
+      <aside className={`
+        fixed inset-y-0 left-0 z-50 w-64 bg-slate-900 text-white transform transition-transform duration-300 ease-in-out
+        md:relative md:translate-x-0
+        ${mobileMenuOpen ? 'translate-x-0' : '-translate-x-full'}
+      `}>
+        <div className="p-6 flex items-center space-x-2 border-b border-slate-800">
+          <div className="bg-gradient-to-tr from-blue-500 to-purple-500 p-2 rounded-lg">
+            <Sparkles size={24} className="text-white" />
+          </div>
+          <span className="text-xl font-bold tracking-tight">MarketGen AI</span>
+        </div>
+
+        <nav className="p-4 mt-4">
+          <SidebarItem 
+            icon={LayoutDashboard} 
+            label="Dashboard" 
+            path="/" 
+            active={location.pathname === '/'} 
+          />
+          <SidebarItem 
+            icon={Megaphone} 
+            label="Campaigns" 
+            path="/campaigns" 
+            active={location.pathname.startsWith('/campaigns')} 
+          />
+          <SidebarItem 
+            icon={Package} 
+            label="Products" 
+            path="/products" 
+            active={location.pathname.startsWith('/products')} 
+          />
+          <SidebarItem 
+            icon={Settings} 
+            label="Settings" 
+            path="/settings" 
+            active={location.pathname === '/settings'} 
+          />
+        </nav>
+
+        <div className="absolute bottom-0 left-0 right-0 p-4 bg-slate-900 border-t border-slate-800">
+          <div className="flex items-center space-x-3 p-2 rounded-lg hover:bg-slate-800 cursor-pointer transition-colors">
+            <div className="w-8 h-8 rounded-full bg-gradient-to-r from-emerald-400 to-cyan-500 flex items-center justify-center text-xs font-bold text-slate-900">
+              JD
+            </div>
+            <div className="flex-1">
+              <p className="text-sm font-medium">John Doe</p>
+              <p className="text-xs text-slate-400">Marketer Admin</p>
+            </div>
+            <LogOut size={16} className="text-slate-400" />
+          </div>
+        </div>
+      </aside>
+
+      {/* Main Content */}
+      <div className="flex-1 flex flex-col h-screen overflow-hidden">
+        {/* Header */}
+        <header className="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-4 md:px-8 z-40">
+          <button 
+            onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+            className="md:hidden p-2 text-slate-500 hover:bg-slate-100 rounded-lg"
+          >
+            <Menu size={24} />
+          </button>
+
+          <div className="flex items-center space-x-4 ml-auto">
+             <div className="relative">
+                <span className="absolute -top-1 -right-1 w-2 h-2 bg-red-500 rounded-full animate-pulse"></span>
+                <Bell size={20} className="text-slate-500 hover:text-slate-700 cursor-pointer" />
+             </div>
+             <div className="h-8 w-[1px] bg-slate-200 mx-2"></div>
+             <button className="text-sm font-medium text-slate-600 hover:text-blue-600 transition-colors">
+               Help & Support
+             </button>
+          </div>
+        </header>
+
+        {/* Scrollable Area */}
+        <main className="flex-1 overflow-auto p-4 md:p-8 bg-slate-50/50">
+          <div className="max-w-7xl mx-auto animate-fadeIn">
+            {children}
+          </div>
+        </main>
+      </div>
+
+      {/* Mobile Overlay */}
+      {mobileMenuOpen && (
+        <div 
+          className="fixed inset-0 bg-black/50 z-40 md:hidden"
+          onClick={() => setMobileMenuOpen(false)}
+        ></div>
+      )}
+    </div>
+  );
+};
