@@ -1,22 +1,73 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { Product, Campaign, GeneratedContent } from "../types";
 
-// Initialize Gemini Client
-// Note: In a real environment, allow the user to input key if env is missing, 
-// but per instructions we assume process.env.API_KEY is available or handled.
-const apiKey = process.env.API_KEY || ''; 
-const ai = new GoogleGenAI({ apiKey });
-
 const MARKETING_MODEL = "gemini-3-flash-preview";
+const IMAGE_MODEL = "gemini-3-pro-image-preview";
+
+// Helper to get client with current key
+// We must instantiate this inside functions to ensure we get the latest key from process.env
+const getAiClient = () => {
+  const apiKey = process.env.API_KEY || '';
+  return new GoogleGenAI({ apiKey });
+}
+
+export const generateImage = async (product: Product, contextText: string): Promise<string> => {
+  const apiKey = process.env.API_KEY;
+  // Fallback if no key is present (though App.tsx should enforce it)
+  if (!apiKey) return `https://picsum.photos/seed/${Date.now()}/800/400`;
+
+  const ai = getAiClient();
+
+  const prompt = `
+    Create a high-quality, photorealistic product marketing image.
+    
+    Product: ${product.name}
+    Brand: ${product.brand}
+    Description: ${product.description}
+    
+    Marketing Context: ${contextText}
+    
+    Style: Professional, commercial photography, 4k resolution, cinematic lighting.
+    Ensure the product is the focal point.
+  `;
+
+  try {
+    const response = await ai.models.generateContent({
+      model: IMAGE_MODEL,
+      contents: {
+        parts: [{ text: prompt }]
+      },
+      config: {
+        imageConfig: {
+          aspectRatio: "16:9",
+          imageSize: "1K"
+        }
+      }
+    });
+
+    for (const part of response.candidates?.[0]?.content?.parts || []) {
+      if (part.inlineData) {
+        return `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`;
+      }
+    }
+    return `https://picsum.photos/seed/${Math.floor(Math.random() * 1000)}/800/400`;
+  } catch (error) {
+    console.error("Image Generation Error:", error);
+    return `https://picsum.photos/seed/${Math.floor(Math.random() * 1000)}/800/400`;
+  }
+};
 
 export const generateMarketingContent = async (
   campaign: Campaign,
   product: Product
 ): Promise<GeneratedContent[]> => {
+  const apiKey = process.env.API_KEY;
   if (!apiKey) {
     console.warn("No API Key provided. Returning mock data.");
     return mockGeneration(campaign, product);
   }
+
+  const ai = getAiClient();
 
   const prompt = `
     You are an expert marketing copywriter and compliance officer.
@@ -38,6 +89,7 @@ export const generateMarketingContent = async (
   `;
 
   try {
+    // 1. Generate Text Variants
     const response = await ai.models.generateContent({
       model: MARKETING_MODEL,
       contents: prompt,
@@ -62,19 +114,28 @@ export const generateMarketingContent = async (
 
     const rawData = JSON.parse(response.text || "[]");
     
-    return rawData.map((item: any, index: number) => ({
-      id: `gen-${Date.now()}-${index}`,
-      campaignId: campaign.id,
-      channel: item.channel,
-      audience: item.audience,
-      text: item.text,
-      complianceScore: item.complianceScore,
-      riskLevel: item.riskLevel,
-      status: 'draft',
-      imageUrl: `https://picsum.photos/seed/${index}/800/400`,
-      x: 0,
-      y: 0
-    }));
+    // 2. Generate Images for each variant in parallel
+    // This allows us to use the specific text context for the image generation
+    const enrichedDataPromises = rawData.map(async (item: any, index: number) => {
+      // Generate image specifically for this variant
+      const imageUrl = await generateImage(product, item.text);
+
+      return {
+        id: `gen-${Date.now()}-${index}`,
+        campaignId: campaign.id,
+        channel: item.channel,
+        audience: item.audience,
+        text: item.text,
+        complianceScore: item.complianceScore,
+        riskLevel: item.riskLevel,
+        status: 'draft',
+        imageUrl: imageUrl,
+        x: 0,
+        y: 0
+      };
+    });
+
+    return await Promise.all(enrichedDataPromises);
 
   } catch (error) {
     console.error("Gemini Generation Error:", error);
