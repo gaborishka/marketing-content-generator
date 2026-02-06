@@ -37,6 +37,7 @@ import { Campaign, Product, GeneratedContent } from '../types';
 import { CanvasBoard } from './CanvasBoard';
 import { generateMarketingContent } from '../services/geminiService';
 import { VideoStoryboardModal } from './VideoStoryboardModal';
+import { ContentDetailModal } from './ContentDetailModal';
 
 interface CampaignDetailProps {
   campaigns: Campaign[];
@@ -90,11 +91,14 @@ export const CampaignDetail: React.FC<CampaignDetailProps> = ({
   const { id } = useParams<{ id: string }>();
   const [isGenerating, setIsGenerating] = useState(false);
   const [editingContentId, setEditingContentId] = useState<string | null>(null);
+  const [detailContentId, setDetailContentId] = useState<string | null>(null);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
+  const [canvasFocusTarget, setCanvasFocusTarget] = useState<{ x: number; y: number; timestamp: number } | null>(null);
   
   const campaign = campaigns.find(c => c.id === id);
   const primaryProduct = products.find(p => p.id === campaign?.primaryProductId);
   const secondaryProducts = products.filter(p => campaign?.secondaryProductIds.includes(p.id));
+  const brandName = primaryProduct?.brand || campaign?.name || 'Your Brand';
 
   // Local state for inputs
   const [keyMessageInput, setKeyMessageInput] = useState('');
@@ -119,6 +123,7 @@ export const CampaignDetail: React.FC<CampaignDetailProps> = ({
   // Filter content for this campaign
   const campaignContent = contentStore.filter(c => c.campaignId === id);
   const activeEditingContent = contentStore.find(c => c.id === editingContentId);
+  const activeDetailContent = contentStore.find(c => c.id === detailContentId);
 
   const handleCanvasUpdate = (updatedItems: GeneratedContent[]) => {
     // Update the global store (merging updated items with other campaign items)
@@ -203,6 +208,13 @@ export const CampaignDetail: React.FC<CampaignDetailProps> = ({
     }
 
     onUpdateContent([...contentStore, ...newPlaceholders]);
+
+    // Focus canvas on the new placeholder area
+    if (newPlaceholders.length > 0) {
+      const avgX = newPlaceholders.reduce((sum, p) => sum + p.x, 0) / newPlaceholders.length + 160;
+      const avgY = newPlaceholders.reduce((sum, p) => sum + p.y, 0) / newPlaceholders.length + 200;
+      setCanvasFocusTarget({ x: avgX, y: avgY, timestamp: Date.now() });
+    }
 
     try {
       // 3. Call API
@@ -519,19 +531,33 @@ export const CampaignDetail: React.FC<CampaignDetailProps> = ({
 
         {/* Main Canvas Area */}
         <div className="flex-1 relative">
-           <CanvasBoard 
-              items={campaignContent} 
-              onItemsChange={handleCanvasUpdate} 
+           <CanvasBoard
+              items={campaignContent}
+              onItemsChange={handleCanvasUpdate}
               onEdit={(id) => setEditingContentId(id)}
+              onDoubleClick={(id) => setDetailContentId(id)}
+              brandName={brandName}
+              focusTarget={canvasFocusTarget}
            />
         </div>
       </div>
 
       {activeEditingContent && (
-        <VideoStoryboardModal 
+        <VideoStoryboardModal
           content={activeEditingContent}
           onClose={() => setEditingContentId(null)}
           onUpdate={onUpdateItem}
+        />
+      )}
+
+      {activeDetailContent && (
+        <ContentDetailModal
+          content={activeDetailContent}
+          onClose={() => setDetailContentId(null)}
+          onSave={(updated) => {
+            onUpdateItem(updated);
+            setDetailContentId(null);
+          }}
         />
       )}
     </div>

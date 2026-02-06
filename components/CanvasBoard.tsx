@@ -13,10 +13,13 @@ import { CanvasCard } from './CanvasCard';
 interface CanvasBoardProps {
   items: GeneratedContent[];
   onItemsChange: (items: GeneratedContent[]) => void;
-  onEdit?: (id: string) => void; // Added onEdit prop
+  onEdit?: (id: string) => void;
+  onDoubleClick?: (id: string) => void;
+  brandName?: string;
+  focusTarget?: { x: number; y: number; timestamp: number } | null;
 }
 
-export const CanvasBoard: React.FC<CanvasBoardProps> = ({ items, onItemsChange, onEdit }) => {
+export const CanvasBoard: React.FC<CanvasBoardProps> = ({ items, onItemsChange, onEdit, onDoubleClick, brandName, focusTarget }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   
   // Viewport State
@@ -29,6 +32,17 @@ export const CanvasBoard: React.FC<CanvasBoardProps> = ({ items, onItemsChange, 
   const [selection, setSelection] = useState<string[]>([]);
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
   const [interactionMode, setInteractionMode] = useState<'select' | 'pan'>('select');
+
+  // Auto-pan to focus target when it changes
+  useEffect(() => {
+    if (!focusTarget || !containerRef.current) return;
+    const rect = containerRef.current.getBoundingClientRect();
+    const targetOffset = {
+      x: rect.width / 2 - focusTarget.x * scale,
+      y: rect.height / 2 - focusTarget.y * scale,
+    };
+    setOffset(targetOffset);
+  }, [focusTarget]);
 
   // Mouse Event Handlers for the Canvas (Background)
   const handleMouseDown = (e: React.MouseEvent) => {
@@ -226,14 +240,16 @@ export const CanvasBoard: React.FC<CanvasBoardProps> = ({ items, onItemsChange, 
           {renderConnections()}
           
           {items.map(item => (
-            <CanvasCard 
+            <CanvasCard
               key={item.id}
               content={item}
               isSelected={selection.includes(item.id)}
               scale={scale}
+              brandName={brandName}
               onMouseDown={handleCardMouseDown}
               onEdit={handleEdit}
               onDelete={() => {}}
+              onDoubleClick={onDoubleClick}
             />
           ))}
         </div>
