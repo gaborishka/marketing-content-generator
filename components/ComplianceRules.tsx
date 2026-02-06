@@ -15,8 +15,14 @@ interface ModalState {
   editingRule: ComplianceRule | null;
 }
 
+interface DeleteConfirm {
+  ruleId: string;
+  ruleName: string;
+}
+
 export const ComplianceRules: React.FC<ComplianceRulesProps> = ({ rules, onCreate, onUpdate, onDelete }) => {
   const [modal, setModal] = useState<ModalState>({ open: false, editingRule: null });
+  const [deleteConfirm, setDeleteConfirm] = useState<DeleteConfirm | null>(null);
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [ruleText, setRuleText] = useState('');
@@ -132,11 +138,7 @@ export const ComplianceRules: React.FC<ComplianceRulesProps> = ({ rules, onCreat
                     <Pencil size={14} />
                   </button>
                   <button
-                    onClick={() => {
-                      if (window.confirm(`Delete "${rule.name}"? This cannot be undone.`)) {
-                        onDelete(rule.id);
-                      }
-                    }}
+                    onClick={() => setDeleteConfirm({ ruleId: rule.id, ruleName: rule.name })}
                     className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
                   >
                     <Trash2 size={14} />
@@ -245,6 +247,39 @@ export const ComplianceRules: React.FC<ComplianceRulesProps> = ({ rules, onCreat
                 className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {modal.editingRule ? 'Save Changes' : 'Create Rule'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* Delete Confirmation Modal */}
+      {deleteConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm mx-4 p-6">
+            <div className="flex items-center space-x-3 mb-4">
+              <div className="w-10 h-10 bg-red-100 rounded-full flex items-center justify-center">
+                <Trash2 size={18} className="text-red-600" />
+              </div>
+              <h2 className="text-lg font-bold text-slate-900">Delete Rule</h2>
+            </div>
+            <p className="text-sm text-slate-600 mb-6">
+              Delete "<span className="font-medium">{deleteConfirm.ruleName}</span>"? This cannot be undone.
+            </p>
+            <div className="flex items-center justify-end space-x-3">
+              <button
+                onClick={() => setDeleteConfirm(null)}
+                className="px-4 py-2 text-sm font-medium text-slate-600 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  onDelete(deleteConfirm.ruleId);
+                  setDeleteConfirm(null);
+                }}
+                className="px-4 py-2 text-sm font-medium text-white bg-red-600 rounded-lg hover:bg-red-700 transition-colors"
+              >
+                Delete
               </button>
             </div>
           </div>

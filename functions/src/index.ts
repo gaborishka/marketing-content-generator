@@ -92,6 +92,45 @@ export const generateImage = onCall(
   }
 );
 
+// ── resolveReferenceImage ────────────────────────────────────────────────────
+// Resolve a reference image entry from the client. If it already contains
+// inline imageBytes it is returned as-is. If it contains an imageUrl the
+// image is fetched server-side (avoids a server→client→server round-trip for
+// images that are already in Firebase Storage or on the web).
+
+const MAX_IMAGE_SIZE = 10 * 1024 * 1024; // 10 MB
+
+const resolveReferenceImage = async (entry: any) => {
+  // Already has inline bytes — pass through
+  if (entry.image?.imageBytes) return entry;
+
+  const url: string | undefined = entry.imageUrl;
+  if (!url) {
+    throw new HttpsError("invalid-argument", "Reference image must have image.imageBytes or imageUrl.");
+  }
+
+  const res = await fetch(url);
+  if (!res.ok) {
+    throw new HttpsError("internal", `Failed to fetch reference image: ${res.statusText}`);
+  }
+
+  const arrayBuf = await res.arrayBuffer();
+  if (arrayBuf.byteLength > MAX_IMAGE_SIZE) {
+    throw new HttpsError(
+      "invalid-argument",
+      `Image too large (${Math.round(arrayBuf.byteLength / 1024 / 1024)}MB). Max ${MAX_IMAGE_SIZE / 1024 / 1024}MB.`
+    );
+  }
+
+  const mimeType = res.headers.get("content-type") || "image/png";
+  const imageBytes = Buffer.from(arrayBuf).toString("base64");
+
+  return {
+    image: { imageBytes, mimeType },
+    referenceType: entry.referenceType || "ASSET",
+  };
+};
+
 // ── generateVideo ────────────────────────────────────────────────────────────
 
 export const generateVideo = onCall(
@@ -109,6 +148,9 @@ export const generateVideo = onCall(
       throw new HttpsError("invalid-argument", "contentId is required.");
     }
 
+    // Resolve any URL-based reference images server-side
+    const resolvedImages = await Promise.all(referenceImages.map(resolveReferenceImage));
+
     const ai = getAiClient();
     const startTime = Date.now();
     // Leave 30s safety margin before the 540s Cloud Functions timeout
@@ -120,7 +162,7 @@ export const generateVideo = onCall(
         prompt: prompt || "A cinematic commercial video. Smooth transitions between scenes. High quality, 4k.",
         config: {
           numberOfVideos: 1,
-          referenceImages,
+          referenceImages: resolvedImages,
           resolution: "720p",
           aspectRatio: "16:9",
         },

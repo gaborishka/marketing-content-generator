@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { HashRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { Layout } from './components/Layout';
 import { Dashboard } from './components/Dashboard';
@@ -244,10 +244,10 @@ function App() {
     storage.put('campaigns', newCampaign);
   };
 
-  const handleCampaignUpdate = (updatedCampaign: Campaign) => {
+  const handleCampaignUpdate = useCallback((updatedCampaign: Campaign) => {
     setCampaigns(prev => prev.map(c => c.id === updatedCampaign.id ? updatedCampaign : c));
     storage.put('campaigns', updatedCampaign);
-  };
+  }, []);
 
   const handleContentStoreUpdate = (newContentList: GeneratedContent[]) => {
     // Capture the merged list so persistence/uploads use merged data (not stale input)

@@ -116,15 +116,17 @@ export const CampaignDetail: React.FC<CampaignDetailProps> = ({
   const [contextInput, setContextInput] = useState('');
   const [nameInput, setNameInput] = useState('');
   const [isEditingProducts, setIsEditingProducts] = useState(false);
+  const [isBrandMode, setIsBrandMode] = useState(false);
 
-  // Sync state when campaign loads
+  // Sync state when campaign loads (only on campaign ID change to avoid resetting during edits)
   useEffect(() => {
     if (campaign) {
       setKeyMessageInput(campaign.keyMessage);
       setContextInput(campaign.context || '');
       setNameInput(campaign.name);
+      setIsBrandMode(!campaign.primaryProductId);
     }
-  }, [campaign]);
+  }, [campaign?.id]);
 
   // Migrate old parent channel names to sub-format names
   useEffect(() => {
@@ -144,7 +146,6 @@ export const CampaignDetail: React.FC<CampaignDetailProps> = ({
     if (needsMigration) {
       onUpdateCampaign({ ...campaign, channels: [...new Set(migrated)] });
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [campaign?.id, onUpdateCampaign]);
 
   // Clear status message after 3 seconds
@@ -308,6 +309,11 @@ export const CampaignDetail: React.FC<CampaignDetailProps> = ({
       const contentKeep = contentStore.filter(c => !placeholderIds.includes(c.id));
       onUpdateContent([...contentKeep, ...filledPlaceholders]);
 
+      // Update campaign status after successful generation
+      if (campaign.status === 'draft') {
+        onUpdateCampaign({ ...campaign, status: 'review', progress: 50 });
+      }
+
     } catch (error) {
       console.error("Failed to generate content:", error);
       const placeholderIds = newPlaceholders.map(p => p.id);
@@ -375,6 +381,7 @@ export const CampaignDetail: React.FC<CampaignDetailProps> = ({
 
   const handleSetPrimary = (productId: string) => {
     if (!campaign) return;
+    setIsBrandMode(false);
     const newSecondary = campaign.secondaryProductIds.filter(id => id !== productId);
     onUpdateCampaign({ ...campaign, primaryProductId: productId, secondaryProductIds: newSecondary });
   };
@@ -391,9 +398,13 @@ export const CampaignDetail: React.FC<CampaignDetailProps> = ({
 
   const handleBrandCampaignToggle = () => {
     if (!campaign) return;
-    if (campaign.primaryProductId) {
+    if (!isBrandMode) {
       // Switch to brand campaign
+      setIsBrandMode(true);
       onUpdateCampaign({ ...campaign, primaryProductId: undefined, secondaryProductIds: [] });
+    } else {
+      // Exit brand mode — user can now select a product from the list below
+      setIsBrandMode(false);
     }
   };
 
@@ -542,12 +553,12 @@ export const CampaignDetail: React.FC<CampaignDetailProps> = ({
                  <button
                    onClick={handleBrandCampaignToggle}
                    className={`w-full flex items-center space-x-2 px-3 py-2 rounded-lg border text-xs transition-all ${
-                     !campaign.primaryProductId
+                     isBrandMode
                        ? 'border-purple-300 bg-purple-50 text-purple-700'
                        : 'border-slate-200 bg-white text-slate-600 hover:border-purple-200'
                    }`}
                  >
-                   <Lightbulb size={13} className={!campaign.primaryProductId ? 'text-purple-500' : 'text-slate-400'} />
+                   <Lightbulb size={13} className={isBrandMode ? 'text-purple-500' : 'text-slate-400'} />
                    <span className="font-medium">Brand / Idea Campaign</span>
                  </button>
 
@@ -609,10 +620,15 @@ export const CampaignDetail: React.FC<CampaignDetailProps> = ({
                        </div>
                      </div>
                    </div>
-                 ) : (
+                 ) : isBrandMode ? (
                     <div className="bg-purple-50 border border-purple-100 p-3 rounded-lg text-xs text-purple-700 flex items-center mb-3">
                        <Package size={14} className="mr-2" />
                        <span>Brand / Idea Campaign</span>
+                    </div>
+                 ) : (
+                    <div className="bg-slate-50 border border-slate-200 p-3 rounded-lg text-xs text-slate-500 flex items-center mb-3">
+                       <Package size={14} className="mr-2" />
+                       <span>No product selected</span>
                     </div>
                  )}
 

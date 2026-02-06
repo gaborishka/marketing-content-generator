@@ -7,52 +7,21 @@ const generateContentFn = httpsCallable<any, { text: string }>(functions, 'gener
 const generateImageFn = httpsCallable<any, { mimeType: string; data: string }>(functions, 'generateImage');
 const generateVideoFn = httpsCallable<any, { videoUrl: string }>(functions, 'generateVideo');
 
-// Helper to convert image (base64 or URL) to video reference object
-const MAX_IMAGE_SIZE = 10 * 1024 * 1024; // 10 MB
-const FETCH_TIMEOUT_MS = 30_000; // 30 seconds
-
-const createReferenceImage = async (imageData: string) => {
-  let base64Data = imageData;
-
-  // If it's a URL (not base64), fetch and convert to base64
-  if (!imageData.startsWith('data:')) {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
-    try {
-      const response = await fetch(imageData, { signal: controller.signal });
-      const contentLength = response.headers.get('content-length');
-      if (contentLength && parseInt(contentLength, 10) > MAX_IMAGE_SIZE) {
-        throw new Error(`Image too large (${Math.round(parseInt(contentLength, 10) / 1024 / 1024)}MB). Max ${MAX_IMAGE_SIZE / 1024 / 1024}MB.`);
-      }
-      const blob = await response.blob();
-      if (blob.size > MAX_IMAGE_SIZE) {
-        throw new Error(`Image too large (${Math.round(blob.size / 1024 / 1024)}MB). Max ${MAX_IMAGE_SIZE / 1024 / 1024}MB.`);
-      }
-      base64Data = await new Promise<string>((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onloadend = () => resolve(reader.result as string);
-        reader.onerror = reject;
-        reader.readAsDataURL(blob);
-      });
-    } finally {
-      clearTimeout(timeoutId);
-    }
+// Build a reference image entry for the Cloud Function.
+// Base64 data URLs are parsed client-side; plain URLs are passed through
+// for the Cloud Function to fetch server-side (avoids server→client→server round-trip).
+const createReferenceImage = (imageData: string) => {
+  if (imageData.startsWith('data:')) {
+    const mimeMatch = imageData.match(/^data:(image\/\w+);base64,/);
+    const mimeType = mimeMatch ? mimeMatch[1] : 'image/png';
+    const data = imageData.replace(/^data:image\/\w+;base64,/, "");
+    return {
+      image: { imageBytes: data, mimeType },
+      referenceType: 'ASSET' as const,
+    };
   }
-
-  // Extract real mime type from data URL
-  const mimeMatch = base64Data.match(/^data:(image\/\w+);base64,/);
-  const mimeType = mimeMatch ? mimeMatch[1] : 'image/png';
-
-  // Strip prefix
-  const data = base64Data.replace(/^data:image\/\w+;base64,/, "");
-
-  return {
-    image: {
-      imageBytes: data,
-      mimeType: mimeType,
-    },
-    referenceType: 'ASSET' as const
-  };
+  // URL — let the Cloud Function resolve it
+  return { imageUrl: imageData, referenceType: 'ASSET' as const };
 };
 
 export const generateImage = async (product: Product | undefined, contextText: string): Promise<string> => {
@@ -94,15 +63,8 @@ export const generateVideoFromStoryboard = async (storyboard: Scene[], contentId
     throw new Error("No images available in storyboard to generate video.");
   }
 
-  // Prepare reference images client-side (Up to 3)
-  let referenceImages;
-  try {
-    referenceImages = await Promise.all(
-      validScenes.slice(0, 3).map(s => createReferenceImage(s.imageUrl!))
-    );
-  } catch (e: any) {
-    throw new Error(e.message || "Failed to process storyboard images. Ensure they are fully generated.");
-  }
+  // Prepare reference images (up to 3). URLs are resolved server-side.
+  const referenceImages = validScenes.slice(0, 3).map(s => createReferenceImage(s.imageUrl!));
 
   try {
     const result = await generateVideoFn({
