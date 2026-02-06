@@ -1,11 +1,39 @@
 import { onCall, HttpsError } from "firebase-functions/v2/https";
 import { defineSecret } from "firebase-functions/params";
-import { GoogleGenAI } from "@google/genai";
+import { GoogleGenAI, Type, VideoGenerationReferenceType } from "@google/genai";
 import { initializeApp } from "firebase-admin/app";
 import { getStorage } from "firebase-admin/storage";
 import { randomUUID } from "crypto";
 
 initializeApp();
+
+// ── Input interfaces for Cloud Function request.data ─────────────────────────
+
+interface GenerateContentInput {
+  prompt: string;
+  responseSchema?: {
+    type: Type;
+    items?: Record<string, unknown>;
+    properties?: Record<string, unknown>;
+    required?: string[];
+  };
+}
+
+interface GenerateImageInput {
+  prompt: string;
+}
+
+interface ReferenceImageEntry {
+  image?: { imageBytes: string; mimeType: string };
+  imageUrl?: string;
+  referenceType?: VideoGenerationReferenceType;
+}
+
+interface GenerateVideoInput {
+  referenceImages: ReferenceImageEntry[];
+  prompt?: string;
+  contentId: string;
+}
 
 const GEMINI_API_KEY = defineSecret("GEMINI_API_KEY");
 
@@ -20,7 +48,7 @@ export const generateContent = onCall(
       throw new HttpsError("unauthenticated", "Authentication required.");
     }
 
-    const { prompt, responseSchema } = request.data;
+    const { prompt, responseSchema } = request.data as GenerateContentInput;
     if (!prompt) {
       throw new HttpsError("invalid-argument", "prompt is required.");
     }
@@ -55,7 +83,7 @@ export const generateImage = onCall(
       throw new HttpsError("unauthenticated", "Authentication required.");
     }
 
-    const { prompt } = request.data;
+    const { prompt } = request.data as GenerateImageInput;
     if (!prompt) {
       throw new HttpsError("invalid-argument", "prompt is required.");
     }
@@ -100,7 +128,7 @@ export const generateImage = onCall(
 
 const MAX_IMAGE_SIZE = 10 * 1024 * 1024; // 10 MB
 
-const resolveReferenceImage = async (entry: any) => {
+const resolveReferenceImage = async (entry: ReferenceImageEntry) => {
   // Already has inline bytes — pass through
   if (entry.image?.imageBytes) return entry;
 
@@ -127,7 +155,7 @@ const resolveReferenceImage = async (entry: any) => {
 
   return {
     image: { imageBytes, mimeType },
-    referenceType: entry.referenceType || "ASSET",
+    referenceType: entry.referenceType || VideoGenerationReferenceType.ASSET,
   };
 };
 
@@ -140,7 +168,7 @@ export const generateVideo = onCall(
       throw new HttpsError("unauthenticated", "Authentication required.");
     }
 
-    const { referenceImages, prompt, contentId } = request.data;
+    const { referenceImages, prompt, contentId } = request.data as GenerateVideoInput;
     if (!referenceImages || referenceImages.length === 0) {
       throw new HttpsError("invalid-argument", "referenceImages is required.");
     }

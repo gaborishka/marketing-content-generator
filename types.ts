@@ -110,6 +110,7 @@ export const CHANNEL_FORMATS: Record<string, string[]> = {
   'Facebook': ['Facebook Post', 'Facebook Ad'],
   'YouTube': ['YouTube Video', 'YouTube Short'],
   'Pinterest': ['Pinterest Pin'],
+  'Video Storyboard': ['Video Storyboard'],
 };
 
 // Pre-computed reverse lookup: sub-format name → parent channel name

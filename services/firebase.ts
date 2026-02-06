@@ -19,6 +19,6 @@ export const auth = getAuth(app);           // → authService.ts
 export const storage = getStorage(app);     // → fileStorage.ts
 export const functions = getFunctions(app); // → geminiService.ts (Cloud Function calls)
 
-if (import.meta.env.DEV) {
+if (import.meta.env.DEV && import.meta.env.VITE_USE_EMULATORS === 'true') {
   connectFunctionsEmulator(functions, '127.0.0.1', 5001);
 }

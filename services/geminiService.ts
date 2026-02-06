@@ -1,5 +1,6 @@
 
 import { httpsCallable } from 'firebase/functions';
+import { Type } from '@google/genai';
 import { functions } from './firebase';
 import { Product, Campaign, GeneratedContent, Scene, ComplianceRule } from "../types";
 
@@ -153,23 +154,23 @@ export const generateMarketingContent = async (
   `;
 
   const responseSchema = {
-    type: 'ARRAY',
+    type: Type.ARRAY,
     items: {
-      type: 'OBJECT',
+      type: Type.OBJECT,
       properties: {
-        channel: { type: 'STRING' },
-        audience: { type: 'STRING' },
-        text: { type: 'STRING' },
-        complianceScore: { type: 'NUMBER' },
-        riskLevel: { type: 'STRING', enum: ["low", "medium", "high"] },
+        channel: { type: Type.STRING },
+        audience: { type: Type.STRING },
+        text: { type: Type.STRING },
+        complianceScore: { type: Type.NUMBER },
+        riskLevel: { type: Type.STRING, enum: ["low", "medium", "high"] },
         storyboard: {
-          type: 'ARRAY',
+          type: Type.ARRAY,
           items: {
-            type: 'OBJECT',
+            type: Type.OBJECT,
             properties: {
-              sceneNumber: { type: 'INTEGER' },
-              imagePrompt: { type: 'STRING' },
-              voiceover: { type: 'STRING' }
+              sceneNumber: { type: Type.INTEGER },
+              imagePrompt: { type: Type.STRING },
+              voiceover: { type: Type.STRING }
             }
           }
         }

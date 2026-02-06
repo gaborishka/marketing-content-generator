@@ -6,10 +6,62 @@ import {
   FileText,
   Lightbulb,
   ShieldCheck,
-  CheckCircle2
+  CheckCircle2,
+  Mail,
+  Linkedin,
+  Twitter,
+  Instagram,
+  Globe2,
+  Tv,
+  Facebook,
+  Youtube,
+  Image,
+  Video,
+  Stethoscope,
+  Heart,
+  Users,
+  Globe,
+  GraduationCap,
+  UserCircle,
+  Baby,
+  Pill,
+  Building2,
+  Send,
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
-import { Campaign, Product, ComplianceRule } from '../types';
+import { Campaign, Product, ComplianceRule, CHANNEL_FORMATS } from '../types';
+
+interface ChipOption {
+  label: string;
+  icon: React.ElementType;
+  selectedClasses: string;
+  selectedIconClass: string;
+}
+
+const AUDIENCE_CHIPS: ChipOption[] = [
+  { label: 'Healthcare Professionals', icon: Stethoscope, selectedClasses: 'bg-blue-50 border-blue-300 text-blue-700 ring-1 ring-blue-200', selectedIconClass: 'text-blue-500' },
+  { label: 'Patients', icon: Heart, selectedClasses: 'bg-rose-50 border-rose-300 text-rose-700 ring-1 ring-rose-200', selectedIconClass: 'text-rose-500' },
+  { label: 'Caregivers', icon: Users, selectedClasses: 'bg-amber-50 border-amber-300 text-amber-700 ring-1 ring-amber-200', selectedIconClass: 'text-amber-500' },
+  { label: 'General Public', icon: Globe, selectedClasses: 'bg-slate-100 border-slate-400 text-slate-700 ring-1 ring-slate-300', selectedIconClass: 'text-slate-600' },
+  { label: 'Students', icon: GraduationCap, selectedClasses: 'bg-indigo-50 border-indigo-300 text-indigo-700 ring-1 ring-indigo-200', selectedIconClass: 'text-indigo-500' },
+  { label: 'Seniors', icon: UserCircle, selectedClasses: 'bg-teal-50 border-teal-300 text-teal-700 ring-1 ring-teal-200', selectedIconClass: 'text-teal-500' },
+  { label: 'Parents', icon: Baby, selectedClasses: 'bg-pink-50 border-pink-300 text-pink-700 ring-1 ring-pink-200', selectedIconClass: 'text-pink-500' },
+  { label: 'Pharmacists', icon: Pill, selectedClasses: 'bg-emerald-50 border-emerald-300 text-emerald-700 ring-1 ring-emerald-200', selectedIconClass: 'text-emerald-500' },
+  { label: 'Hospital Administrators', icon: Building2, selectedClasses: 'bg-violet-50 border-violet-300 text-violet-700 ring-1 ring-violet-200', selectedIconClass: 'text-violet-500' },
+];
+
+const CHANNEL_CHIPS: ChipOption[] = [
+  { label: 'Email', icon: Mail, selectedClasses: 'bg-blue-50 border-blue-300 text-blue-700 ring-1 ring-blue-200', selectedIconClass: 'text-blue-500' },
+  { label: 'LinkedIn', icon: Linkedin, selectedClasses: 'bg-sky-50 border-sky-300 text-sky-700 ring-1 ring-sky-200', selectedIconClass: 'text-sky-500' },
+  { label: 'Twitter', icon: Twitter, selectedClasses: 'bg-cyan-50 border-cyan-300 text-cyan-700 ring-1 ring-cyan-200', selectedIconClass: 'text-cyan-500' },
+  { label: 'Instagram', icon: Instagram, selectedClasses: 'bg-pink-50 border-pink-300 text-pink-700 ring-1 ring-pink-200', selectedIconClass: 'text-pink-500' },
+  { label: 'Web', icon: Globe2, selectedClasses: 'bg-emerald-50 border-emerald-300 text-emerald-700 ring-1 ring-emerald-200', selectedIconClass: 'text-emerald-500' },
+  { label: 'TikTok', icon: Tv, selectedClasses: 'bg-fuchsia-50 border-fuchsia-300 text-fuchsia-700 ring-1 ring-fuchsia-200', selectedIconClass: 'text-fuchsia-500' },
+  { label: 'Facebook', icon: Facebook, selectedClasses: 'bg-indigo-50 border-indigo-300 text-indigo-700 ring-1 ring-indigo-200', selectedIconClass: 'text-indigo-500' },
+  { label: 'YouTube', icon: Youtube, selectedClasses: 'bg-red-50 border-red-300 text-red-700 ring-1 ring-red-200', selectedIconClass: 'text-red-500' },
+  { label: 'Pinterest', icon: Image, selectedClasses: 'bg-rose-50 border-rose-300 text-rose-700 ring-1 ring-rose-200', selectedIconClass: 'text-rose-500' },
+  { label: 'Video Storyboard', icon: Video, selectedClasses: 'bg-violet-50 border-violet-300 text-violet-700 ring-1 ring-violet-200', selectedIconClass: 'text-violet-500' },
+];
 
 interface ContentGeneratorProps {
   products: Product[];
@@ -31,6 +83,20 @@ export const ContentGenerator: React.FC<ContentGeneratorProps> = ({ products, co
   const [context, setContext] = useState('');
   const [attachments, setAttachments] = useState<File[]>([]);
   const [selectedComplianceRuleId, setSelectedComplianceRuleId] = useState<string | undefined>(undefined);
+  const [selectedAudiences, setSelectedAudiences] = useState<string[]>([]);
+  const [selectedChannels, setSelectedChannels] = useState<string[]>([]);
+
+  const handleToggleAudience = (aud: string) => {
+    setSelectedAudiences(prev =>
+      prev.includes(aud) ? prev.filter(a => a !== aud) : [...prev, aud]
+    );
+  };
+
+  const handleToggleChannel = (ch: string) => {
+    setSelectedChannels(prev =>
+      prev.includes(ch) ? prev.filter(c => c !== ch) : [...prev, ch]
+    );
+  };
 
   const handlePrimarySelect = (id: string) => {
     if (primaryProductId === id) {
@@ -86,8 +152,8 @@ export const ContentGenerator: React.FC<ContentGeneratorProps> = ({ products, co
       secondaryProductIds: secondaryProductIds,
       context: context,
       attachments: attachments.map(f => f.name),
-      targetAudiences: [],
-      channels: [],
+      targetAudiences: selectedAudiences,
+      channels: selectedChannels,
       languages: ['en'],
       keyMessage,
       startDate: new Date().toISOString(),
@@ -320,6 +386,75 @@ export const ContentGenerator: React.FC<ContentGeneratorProps> = ({ products, co
               </div>
             )}
           </div>
+
+          {/* Target Audiences Card */}
+          <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
+            <h2 className="text-xl font-bold text-slate-900 mb-4 flex items-center">
+              <Users size={20} className="mr-2 text-blue-600" />
+              Target Audiences
+            </h2>
+            <div className="flex flex-wrap gap-2">
+              {AUDIENCE_CHIPS.map(({ label, icon: Icon, selectedClasses, selectedIconClass }) => {
+                const isSelected = selectedAudiences.includes(label);
+                return (
+                  <button
+                    key={label}
+                    onClick={() => handleToggleAudience(label)}
+                    className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all duration-150 border cursor-pointer ${
+                      isSelected
+                        ? `${selectedClasses} shadow-sm`
+                        : 'bg-white border-slate-200 text-slate-500 hover:border-slate-300 hover:bg-slate-50'
+                    }`}
+                  >
+                    <Icon size={13} className={isSelected ? selectedIconClass : 'text-slate-400'} />
+                    <span>{label}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Channels Card */}
+          <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
+            <h2 className="text-xl font-bold text-slate-900 mb-4 flex items-center">
+              <Send size={20} className="mr-2 text-indigo-600" />
+              Channels
+            </h2>
+            <div className="space-y-3">
+              {CHANNEL_CHIPS.map(({ label, icon: Icon, selectedClasses }) => {
+                const subFormats = CHANNEL_FORMATS[label] || [label];
+                const anySelected = subFormats.some(sf => selectedChannels.includes(sf));
+                return (
+                  <div key={label}>
+                    <div className="flex items-center gap-2 mb-1.5">
+                      <Icon size={14} className={anySelected ? 'text-indigo-500' : 'text-slate-400'} />
+                      <span className={`text-xs font-semibold ${anySelected ? 'text-slate-800' : 'text-slate-500'}`}>{label}</span>
+                    </div>
+                    <div className="flex flex-wrap gap-1.5 ml-5">
+                      {subFormats.map(sf => {
+                        const isSelected = selectedChannels.includes(sf);
+                        const shortName = sf.startsWith(label) ? sf.slice(label.length).trim() : sf;
+                        return (
+                          <button
+                            key={sf}
+                            onClick={() => handleToggleChannel(sf)}
+                            className={`inline-flex items-center gap-1 px-2 py-1 rounded text-[11px] font-medium transition-all duration-150 border cursor-pointer ${
+                              isSelected
+                                ? `${selectedClasses} shadow-sm`
+                                : 'bg-white border-slate-200 text-slate-400 hover:border-slate-300 hover:bg-slate-50'
+                            }`}
+                          >
+                            {isSelected && <CheckCircle2 size={10} />}
+                            <span>{shortName || label}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
         </div>
 
         {/* Preview Panel */}
@@ -383,12 +518,26 @@ export const ContentGenerator: React.FC<ContentGeneratorProps> = ({ products, co
                       : 'None'}
                   </span>
                 </li>
+                <li className="flex justify-between border-b border-slate-800 pb-2">
+                  <span>Audiences</span>
+                  <span className="text-white font-medium">{selectedAudiences.length}</span>
+                </li>
+                <li className="flex justify-between border-b border-slate-800 pb-2">
+                  <span>Channels</span>
+                  <span className="text-white font-medium">{selectedChannels.length}</span>
+                </li>
               </ul>
             </div>
 
-            <div className="mt-6 p-3 bg-slate-800 rounded-lg text-xs text-slate-400 mb-4">
-              You'll configure target audiences and channels on the canvas workspace after creation.
-            </div>
+            {selectedAudiences.length === 0 || selectedChannels.length === 0 ? (
+              <div className="mt-6 p-3 bg-amber-900/30 rounded-lg text-xs text-amber-300 mb-4">
+                Select at least 1 audience and 1 channel to generate content immediately after creation.
+              </div>
+            ) : (
+              <div className="mt-6 p-3 bg-green-900/30 rounded-lg text-xs text-green-300 mb-4">
+                Content generation will be ready as soon as you open the campaign canvas.
+              </div>
+            )}
 
             <button
               disabled={!canCreate}
