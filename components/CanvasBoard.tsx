@@ -19,6 +19,8 @@ interface CanvasBoardProps {
   focusTarget?: { x: number; y: number; timestamp: number } | null;
 }
 
+const noopDelete = () => {};
+
 export const CanvasBoard: React.FC<CanvasBoardProps> = ({ items, onItemsChange, onEdit, onDoubleClick, brandName, focusTarget }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   
@@ -32,6 +34,10 @@ export const CanvasBoard: React.FC<CanvasBoardProps> = ({ items, onItemsChange, 
   const [selection, setSelection] = useState<string[]>([]);
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
   const [interactionMode, setInteractionMode] = useState<'select' | 'pan'>('select');
+
+  // Ref-based drag tracking — accumulates movement without triggering re-renders
+  const dragOffsetRef = useRef({ x: 0, y: 0 });
+  const [dragOffset, setDragOffset] = useState<{ x: number; y: number } | null>(null);
 
   // Auto-pan to focus target when it changes
   useEffect(() => {
@@ -71,26 +77,33 @@ export const CanvasBoard: React.FC<CanvasBoardProps> = ({ items, onItemsChange, 
     }
 
     if (isDraggingCard) {
-      // Calculate delta in world coordinates
-      const zoomAdjustedX = e.movementX / scale;
-      const zoomAdjustedY = e.movementY / scale;
-
-      const updatedItems = items.map(item => {
-        if (selection.includes(item.id)) {
-          return {
-            ...item,
-            x: item.x + zoomAdjustedX,
-            y: item.y + zoomAdjustedY
-          };
-        }
-        return item;
-      });
-      
-      onItemsChange(updatedItems);
+      // Accumulate delta in world coordinates via ref (no state update per frame)
+      const dx = e.movementX / scale;
+      const dy = e.movementY / scale;
+      dragOffsetRef.current.x += dx;
+      dragOffsetRef.current.y += dy;
+      // Single state update per frame — only dragged cards consume this via CSS transform
+      setDragOffset({ x: dragOffsetRef.current.x, y: dragOffsetRef.current.y });
     }
   };
 
   const handleMouseUp = () => {
+    // Commit final drag positions once on mouseup
+    if (isDraggingCard && (dragOffsetRef.current.x !== 0 || dragOffsetRef.current.y !== 0)) {
+      const dx = dragOffsetRef.current.x;
+      const dy = dragOffsetRef.current.y;
+      const updatedItems = items.map(item => {
+        if (selection.includes(item.id)) {
+          return { ...item, x: item.x + dx, y: item.y + dy };
+        }
+        return item;
+      });
+      onItemsChange(updatedItems);
+    }
+
+    // Reset drag state
+    dragOffsetRef.current = { x: 0, y: 0 };
+    setDragOffset(null);
     setIsPanning(false);
     setIsDraggingCard(null);
     document.body.style.cursor = 'default';
@@ -239,19 +252,23 @@ export const CanvasBoard: React.FC<CanvasBoardProps> = ({ items, onItemsChange, 
         >
           {renderConnections()}
           
-          {items.map(item => (
-            <CanvasCard
-              key={item.id}
-              content={item}
-              isSelected={selection.includes(item.id)}
-              scale={scale}
-              brandName={brandName}
-              onMouseDown={handleCardMouseDown}
-              onEdit={handleEdit}
-              onDelete={() => {}}
-              onDoubleClick={onDoubleClick}
-            />
-          ))}
+          {items.map(item => {
+            const isSelected = selection.includes(item.id);
+            return (
+              <CanvasCard
+                key={item.id}
+                content={item}
+                isSelected={isSelected}
+                scale={scale}
+                brandName={brandName}
+                dragOffset={isSelected ? dragOffset : null}
+                onMouseDown={handleCardMouseDown}
+                onEdit={handleEdit}
+                onDelete={noopDelete}
+                onDoubleClick={onDoubleClick}
+              />
+            );
+          })}
         </div>
       </div>
     </div>

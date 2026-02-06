@@ -24,17 +24,19 @@ interface CanvasCardProps {
   isSelected: boolean;
   scale: number;
   brandName?: string;
+  dragOffset?: { x: number; y: number } | null;
   onMouseDown: (e: React.MouseEvent, id: string) => void;
   onEdit: (id: string) => void;
   onDelete: (id: string) => void;
   onDoubleClick?: (id: string) => void;
 }
 
-export const CanvasCard: React.FC<CanvasCardProps> = ({
+const CanvasCardInner: React.FC<CanvasCardProps> = ({
   content,
   isSelected,
   scale,
   brandName = 'Your Brand',
+  dragOffset,
   onMouseDown,
   onEdit,
   onDelete,
@@ -168,15 +170,17 @@ export const CanvasCard: React.FC<CanvasCardProps> = ({
 
   return (
     <div
-      className={`absolute flex flex-col bg-white rounded-xl shadow-sm transition-all duration-200 select-none group ${
-        isSelected ? 'ring-2 ring-blue-500 shadow-xl z-20 scale-[1.02]' : 'hover:shadow-md border border-slate-200 z-10'
+      className={`absolute flex flex-col bg-white rounded-xl shadow-sm transition-shadow duration-200 select-none group ${
+        isSelected ? 'ring-2 ring-blue-500 shadow-xl z-20' : 'hover:shadow-md border border-slate-200 z-10'
       }`}
       style={{
         left: content.x,
         top: content.y,
         width: content.width || 320,
         transformOrigin: '0 0',
-        cursor: 'default'
+        transform: dragOffset ? `translate(${dragOffset.x}px, ${dragOffset.y}px)` : undefined,
+        cursor: 'default',
+        willChange: dragOffset ? 'transform' : undefined,
       }}
       onMouseDown={(e) => onMouseDown(e, content.id)}
       onDoubleClick={(e) => {
@@ -334,3 +338,5 @@ export const CanvasCard: React.FC<CanvasCardProps> = ({
     </div>
   );
 };
+
+export const CanvasCard = React.memo(CanvasCardInner);
