@@ -1,48 +1,28 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 // Use vi.hoisted so mock fns are available in the hoisted vi.mock factory
-const { mockGenerateContent, mockGenerateVideos, mockGetVideosOperation } = vi.hoisted(() => ({
-  mockGenerateContent: vi.fn(),
-  mockGenerateVideos: vi.fn(),
-  mockGetVideosOperation: vi.fn(),
+const { callableMocks } = vi.hoisted(() => ({
+  callableMocks: {} as Record<string, ReturnType<typeof vi.fn>>,
 }));
 
-vi.mock('@google/genai', () => ({
-  GoogleGenAI: class MockGoogleGenAI {
-    constructor() {
-      // no-op
+vi.mock('firebase/functions', () => ({
+  getFunctions: vi.fn(),
+  httpsCallable: (_functions: any, name: string) => {
+    if (!callableMocks[name]) {
+      callableMocks[name] = vi.fn();
     }
-    models = {
-      generateContent: mockGenerateContent,
-      generateVideos: mockGenerateVideos,
-    };
-    operations = {
-      getVideosOperation: mockGetVideosOperation,
-    };
+    return callableMocks[name];
   },
-  Type: {
-    ARRAY: 'ARRAY',
-    OBJECT: 'OBJECT',
-    STRING: 'STRING',
-    NUMBER: 'NUMBER',
-    INTEGER: 'INTEGER',
-  },
+}));
+
+vi.mock('../firebase', () => ({
+  functions: {},
 }));
 
 import { generateImage, generateVideoFromStoryboard, generateMarketingContent } from '../geminiService';
 import type { Product, Campaign, Scene, ComplianceRule } from '../../types';
 
 // ── Helpers ──
-
-const originalEnv = { ...process.env };
-
-const setApiKey = (key: string | undefined) => {
-  if (key === undefined) {
-    delete process.env.API_KEY;
-  } else {
-    process.env.API_KEY = key;
-  }
-};
 
 const makeProduct = (overrides: Partial<Product> = {}): Product => ({
   id: 'prod-1',
@@ -80,76 +60,52 @@ const makeCampaign = (overrides: Partial<Campaign> = {}): Campaign => ({
 
 beforeEach(() => {
   vi.clearAllMocks();
-  // Reset env
-  process.env = { ...originalEnv };
-  delete process.env.API_KEY;
-});
-
-afterEach(() => {
-  process.env = { ...originalEnv };
+  Object.keys(callableMocks).forEach(key => {
+    callableMocks[key].mockReset();
+  });
 });
 
 // ══════════════════════════════ generateImage ══════════════════════════════
 
 describe('generateImage', () => {
-  it('returns picsum placeholder when no API key', async () => {
-    const result = await generateImage(undefined, 'test context');
-    expect(result).toMatch(/^https:\/\/picsum\.photos\/seed\/\d+\/800\/400$/);
-  });
-
-  it('builds product-specific prompt when product is provided', async () => {
-    setApiKey('test-key');
-    mockGenerateContent.mockResolvedValueOnce({
-      candidates: [{ content: { parts: [{ inlineData: { mimeType: 'image/png', data: 'abc' } }] } }],
+  it('calls generateImage Cloud Function with product-specific prompt', async () => {
+    callableMocks['generateImage']?.mockResolvedValueOnce({
+      data: { mimeType: 'image/png', data: 'abc123' },
     });
 
     const product = makeProduct();
-    await generateImage(product, 'summer vibes');
+    const result = await generateImage(product, 'summer vibes');
 
-    const callArgs = mockGenerateContent.mock.calls[0][0];
-    const promptText = callArgs.contents.parts[0].text;
-    expect(promptText).toContain('Widget Pro');
-    expect(promptText).toContain('AcmeCo');
-    expect(promptText).toContain('The best widget');
+    expect(callableMocks['generateImage']).toHaveBeenCalledTimes(1);
+    const callArg = callableMocks['generateImage'].mock.calls[0][0];
+    expect(callArg.prompt).toContain('Widget Pro');
+    expect(callArg.prompt).toContain('AcmeCo');
+    expect(result).toBe('data:image/png;base64,abc123');
   });
 
   it('builds generic prompt when product is undefined', async () => {
-    setApiKey('test-key');
-    mockGenerateContent.mockResolvedValueOnce({
-      candidates: [{ content: { parts: [{ inlineData: { mimeType: 'image/png', data: 'abc' } }] } }],
+    callableMocks['generateImage']?.mockResolvedValueOnce({
+      data: { mimeType: 'image/png', data: 'abc' },
     });
 
     await generateImage(undefined, 'abstract branding');
 
-    const callArgs = mockGenerateContent.mock.calls[0][0];
-    const promptText = callArgs.contents.parts[0].text;
-    expect(promptText).toContain('abstract branding');
-    expect(promptText).not.toContain('Widget Pro');
+    const callArg = callableMocks['generateImage'].mock.calls[0][0];
+    expect(callArg.prompt).toContain('abstract branding');
+    expect(callArg.prompt).not.toContain('Widget Pro');
   });
 
-  it('returns base64 data URL from successful API response', async () => {
-    setApiKey('test-key');
-    mockGenerateContent.mockResolvedValueOnce({
-      candidates: [{ content: { parts: [{ inlineData: { mimeType: 'image/jpeg', data: '/9j/4AAQ' } }] } }],
+  it('returns base64 data URL from successful Cloud Function response', async () => {
+    callableMocks['generateImage']?.mockResolvedValueOnce({
+      data: { mimeType: 'image/jpeg', data: '/9j/4AAQ' },
     });
 
     const result = await generateImage(undefined, 'test');
     expect(result).toBe('data:image/jpeg;base64,/9j/4AAQ');
   });
 
-  it('returns picsum placeholder on API error', async () => {
-    setApiKey('test-key');
-    mockGenerateContent.mockRejectedValueOnce(new Error('API down'));
-
-    const result = await generateImage(undefined, 'test');
-    expect(result).toMatch(/^https:\/\/picsum\.photos\/seed\/\d+\/800\/400$/);
-  });
-
-  it('returns picsum placeholder when response has no inline data', async () => {
-    setApiKey('test-key');
-    mockGenerateContent.mockResolvedValueOnce({
-      candidates: [{ content: { parts: [{ text: 'no image here' }] } }],
-    });
+  it('returns picsum placeholder on Cloud Function error', async () => {
+    callableMocks['generateImage']?.mockRejectedValueOnce(new Error('Function error'));
 
     const result = await generateImage(undefined, 'test');
     expect(result).toMatch(/^https:\/\/picsum\.photos\/seed\/\d+\/800\/400$/);
@@ -159,12 +115,7 @@ describe('generateImage', () => {
 // ══════════════════════════ generateVideoFromStoryboard ══════════════════════════
 
 describe('generateVideoFromStoryboard', () => {
-  it('throws when no API key', async () => {
-    await expect(generateVideoFromStoryboard([])).rejects.toThrow('API Key required');
-  });
-
   it('throws when storyboard has no valid images', async () => {
-    setApiKey('test-key');
     const scenes: Scene[] = [
       { sceneNumber: 1, imagePrompt: 'p', voiceover: 'v' }, // no imageUrl
     ];
@@ -173,8 +124,6 @@ describe('generateVideoFromStoryboard', () => {
   });
 
   it('slices to at most 3 scenes for reference images', async () => {
-    setApiKey('test-key');
-
     // Mock fetch for createReferenceImage (URL path)
     const mockBlob = new Blob(['fake'], { type: 'image/png' });
     global.fetch = vi.fn().mockResolvedValue({
@@ -195,8 +144,8 @@ describe('generateVideoFromStoryboard', () => {
     }
     global.FileReader = MockFileReader as any;
 
-    // Set up video generation to fail fast (we're testing the slice, not the full flow)
-    mockGenerateVideos.mockRejectedValueOnce(new Error('test-stop'));
+    // Set up video Cloud Function to fail fast
+    callableMocks['generateVideo']?.mockRejectedValueOnce(new Error('test-stop'));
 
     const scenes: Scene[] = [
       { sceneNumber: 1, imagePrompt: 'p1', voiceover: 'v1', imageUrl: 'https://example.com/1.png' },
@@ -213,64 +162,39 @@ describe('generateVideoFromStoryboard', () => {
     global.FileReader = originalFileReader;
   });
 
-  it('polls until operation.done is true', async () => {
-    setApiKey('test-key');
-
-    // Use base64 scenes to skip fetch/FileReader
+  it('calls generateVideo Cloud Function and returns blob URL', async () => {
     const scenes: Scene[] = [
       { sceneNumber: 1, imagePrompt: 'p', voiceover: 'v', imageUrl: 'data:image/png;base64,abc' },
     ];
 
-    // First call: not done, second poll: done
-    mockGenerateVideos.mockResolvedValueOnce({ done: false });
-    mockGetVideosOperation
-      .mockResolvedValueOnce({ done: false })
-      .mockResolvedValueOnce({
-        done: true,
-        response: {
-          generatedVideos: [{ video: { uri: 'https://genai.example.com/video.mp4' } }],
-        },
-      });
-
-    // Mock fetch for the final video download
-    const videoBlob = new Blob(['video'], { type: 'video/mp4' });
-    global.fetch = vi.fn().mockResolvedValue({
-      ok: true,
-      blob: () => Promise.resolve(videoBlob),
-    } as any);
+    // Mock the video Cloud Function response
+    callableMocks['generateVideo']?.mockResolvedValueOnce({
+      data: { videoBase64: 'dmlkZW8=', mimeType: 'video/mp4' },
+    });
 
     // Mock URL.createObjectURL
     const originalCreateObjectURL = global.URL.createObjectURL;
     global.URL.createObjectURL = vi.fn().mockReturnValue('blob:mock-video-url');
 
-    // Shorten the poll delay
-    vi.useFakeTimers();
-    const promise = generateVideoFromStoryboard(scenes);
-    // Advance past two 5s delays
-    await vi.advanceTimersByTimeAsync(5000);
-    await vi.advanceTimersByTimeAsync(5000);
-    const result = await promise;
+    const result = await generateVideoFromStoryboard(scenes);
 
-    expect(mockGetVideosOperation).toHaveBeenCalledTimes(2);
+    expect(callableMocks['generateVideo']).toHaveBeenCalledTimes(1);
+    const callArg = callableMocks['generateVideo'].mock.calls[0][0];
+    expect(callArg.referenceImages).toHaveLength(1);
+    expect(callArg.prompt).toContain('cinematic');
     expect(result).toBe('blob:mock-video-url');
 
-    vi.useRealTimers();
     global.URL.createObjectURL = originalCreateObjectURL;
   });
 
-  it('throws on operation error', async () => {
-    setApiKey('test-key');
-
+  it('throws on Cloud Function error', async () => {
     const scenes: Scene[] = [
       { sceneNumber: 1, imagePrompt: 'p', voiceover: 'v', imageUrl: 'data:image/png;base64,abc' },
     ];
 
-    mockGenerateVideos.mockResolvedValueOnce({
-      done: true,
-      error: { message: 'Veo failed' },
-    });
+    callableMocks['generateVideo']?.mockRejectedValueOnce(new Error('Video generation failed'));
 
-    await expect(generateVideoFromStoryboard(scenes)).rejects.toThrow('Video generation failed: Veo failed');
+    await expect(generateVideoFromStoryboard(scenes)).rejects.toThrow('Video generation failed');
   });
 });
 
@@ -280,42 +204,37 @@ describe('generateMarketingContent', () => {
   const product = makeProduct();
   const allProducts = [product];
 
-  it('falls back to mockGeneration when no API key', async () => {
-    const campaign = makeCampaign();
-    const result = await generateMarketingContent(campaign, allProducts);
-
-    expect(result.length).toBeGreaterThan(0);
-    expect(result[0].text).toContain('Widget Pro');
-    expect(result[0].text).toContain('Mock content');
-    expect(mockGenerateContent).not.toHaveBeenCalled();
-  });
-
-  it('includes primary product in prompt', async () => {
-    setApiKey('test-key');
-    mockGenerateContent.mockResolvedValueOnce({ text: '[]' });
+  it('calls generateContent Cloud Function with correct prompt', async () => {
+    callableMocks['generateContent']?.mockResolvedValueOnce({
+      data: { text: '[]' },
+    });
 
     await generateMarketingContent(makeCampaign(), allProducts);
 
-    const callArgs = mockGenerateContent.mock.calls[0][0];
-    expect(callArgs.contents).toContain('Widget Pro');
-    expect(callArgs.contents).toContain('AcmeCo');
+    expect(callableMocks['generateContent']).toHaveBeenCalledTimes(1);
+    const callArg = callableMocks['generateContent'].mock.calls[0][0];
+    expect(callArg.prompt).toContain('Widget Pro');
+    expect(callArg.prompt).toContain('AcmeCo');
+    expect(callArg.responseSchema).toBeDefined();
   });
 
   it('includes secondary products in prompt', async () => {
-    setApiKey('test-key');
     const secondary = makeProduct({ id: 'prod-2', name: 'Gizmo Plus' });
-    mockGenerateContent.mockResolvedValueOnce({ text: '[]' });
+    callableMocks['generateContent']?.mockResolvedValueOnce({
+      data: { text: '[]' },
+    });
 
     const campaign = makeCampaign({ secondaryProductIds: ['prod-2'] });
     await generateMarketingContent(campaign, [product, secondary]);
 
-    const callArgs = mockGenerateContent.mock.calls[0][0];
-    expect(callArgs.contents).toContain('Gizmo Plus');
+    const callArg = callableMocks['generateContent'].mock.calls[0][0];
+    expect(callArg.prompt).toContain('Gizmo Plus');
   });
 
   it('includes compliance rules in prompt when provided', async () => {
-    setApiKey('test-key');
-    mockGenerateContent.mockResolvedValueOnce({ text: '[]' });
+    callableMocks['generateContent']?.mockResolvedValueOnce({
+      data: { text: '[]' },
+    });
 
     const complianceRule: ComplianceRule = {
       id: 'rule-1',
@@ -328,24 +247,24 @@ describe('generateMarketingContent', () => {
 
     await generateMarketingContent(makeCampaign(), allProducts, complianceRule);
 
-    const callArgs = mockGenerateContent.mock.calls[0][0];
-    expect(callArgs.contents).toContain('FDA Guidelines');
-    expect(callArgs.contents).toContain('No unapproved claims');
+    const callArg = callableMocks['generateContent'].mock.calls[0][0];
+    expect(callArg.prompt).toContain('FDA Guidelines');
+    expect(callArg.prompt).toContain('No unapproved claims');
   });
 
   it('handles brand/idea campaigns (no primary product)', async () => {
-    setApiKey('test-key');
-    mockGenerateContent.mockResolvedValueOnce({ text: '[]' });
+    callableMocks['generateContent']?.mockResolvedValueOnce({
+      data: { text: '[]' },
+    });
 
     const campaign = makeCampaign({ primaryProductId: undefined });
     await generateMarketingContent(campaign, allProducts);
 
-    const callArgs = mockGenerateContent.mock.calls[0][0];
-    expect(callArgs.contents).toContain('Brand/Idea Campaign');
+    const callArg = callableMocks['generateContent'].mock.calls[0][0];
+    expect(callArg.prompt).toContain('Brand/Idea Campaign');
   });
 
   it('parses JSON response into GeneratedContent array', async () => {
-    setApiKey('test-key');
     const apiResponse = [
       {
         channel: 'Twitter',
@@ -355,7 +274,9 @@ describe('generateMarketingContent', () => {
         riskLevel: 'low',
       },
     ];
-    mockGenerateContent.mockResolvedValueOnce({ text: JSON.stringify(apiResponse) });
+    callableMocks['generateContent']?.mockResolvedValueOnce({
+      data: { text: JSON.stringify(apiResponse) },
+    });
 
     const result = await generateMarketingContent(makeCampaign(), allProducts);
 
@@ -371,8 +292,9 @@ describe('generateMarketingContent', () => {
   });
 
   it('falls back to mock on JSON parse error', async () => {
-    setApiKey('test-key');
-    mockGenerateContent.mockResolvedValueOnce({ text: 'not valid json{{{' });
+    callableMocks['generateContent']?.mockResolvedValueOnce({
+      data: { text: 'not valid json{{{' },
+    });
 
     const result = await generateMarketingContent(makeCampaign(), allProducts);
 
@@ -381,8 +303,9 @@ describe('generateMarketingContent', () => {
   });
 
   it('falls back to mock when response is not an array', async () => {
-    setApiKey('test-key');
-    mockGenerateContent.mockResolvedValueOnce({ text: '{"notAnArray": true}' });
+    callableMocks['generateContent']?.mockResolvedValueOnce({
+      data: { text: '{"notAnArray": true}' },
+    });
 
     const result = await generateMarketingContent(makeCampaign(), allProducts);
 
@@ -390,9 +313,8 @@ describe('generateMarketingContent', () => {
     expect(result[0].text).toContain('Mock content');
   });
 
-  it('falls back to mock on API error', async () => {
-    setApiKey('test-key');
-    mockGenerateContent.mockRejectedValueOnce(new Error('API failure'));
+  it('falls back to mock on Cloud Function error', async () => {
+    callableMocks['generateContent']?.mockRejectedValueOnce(new Error('Function failure'));
 
     const result = await generateMarketingContent(makeCampaign(), allProducts);
 
@@ -401,7 +323,6 @@ describe('generateMarketingContent', () => {
   });
 
   it('parses video storyboard channel correctly', async () => {
-    setApiKey('test-key');
     const apiResponse = [
       {
         channel: 'Video Storyboard',
@@ -415,7 +336,9 @@ describe('generateMarketingContent', () => {
         ],
       },
     ];
-    mockGenerateContent.mockResolvedValueOnce({ text: JSON.stringify(apiResponse) });
+    callableMocks['generateContent']?.mockResolvedValueOnce({
+      data: { text: JSON.stringify(apiResponse) },
+    });
 
     const result = await generateMarketingContent(makeCampaign(), allProducts);
 
@@ -428,8 +351,10 @@ describe('generateMarketingContent', () => {
 
 // ══════════════════════ mockGeneration (tested indirectly) ══════════════════════
 
-describe('mockGeneration (via generateMarketingContent with no API key)', () => {
+describe('mockGeneration (via generateMarketingContent on error)', () => {
   it('generates content for each channel x audience combination', async () => {
+    callableMocks['generateContent']?.mockRejectedValueOnce(new Error('fail'));
+
     const campaign = makeCampaign({
       channels: ['Twitter', 'Email'],
       targetAudiences: ['Teens', 'Adults'],
@@ -445,7 +370,9 @@ describe('mockGeneration (via generateMarketingContent with no API key)', () => 
     expect(combos).toContain('Email-Adults');
   });
 
-  it('caps at 5 items maximum', async () => {
+  it('caps at 6 items maximum', async () => {
+    callableMocks['generateContent']?.mockRejectedValueOnce(new Error('fail'));
+
     const campaign = makeCampaign({
       channels: ['Twitter', 'Email', 'LinkedIn'],
       targetAudiences: ['A', 'B', 'C'],
@@ -453,10 +380,12 @@ describe('mockGeneration (via generateMarketingContent with no API key)', () => 
 
     const result = await generateMarketingContent(campaign, [makeProduct()]);
 
-    expect(result).toHaveLength(5);
+    expect(result).toHaveLength(6);
   });
 
   it('uses primary product name when available', async () => {
+    callableMocks['generateContent']?.mockRejectedValueOnce(new Error('fail'));
+
     const campaign = makeCampaign({ primaryProductId: 'prod-1' });
     const result = await generateMarketingContent(campaign, [makeProduct()]);
 
@@ -464,6 +393,8 @@ describe('mockGeneration (via generateMarketingContent with no API key)', () => 
   });
 
   it('uses "Brand Idea" label when no primary product', async () => {
+    callableMocks['generateContent']?.mockRejectedValueOnce(new Error('fail'));
+
     const campaign = makeCampaign({ primaryProductId: undefined });
     const result = await generateMarketingContent(campaign, [makeProduct()]);
 
@@ -471,6 +402,8 @@ describe('mockGeneration (via generateMarketingContent with no API key)', () => 
   });
 
   it('returns correct GeneratedContent shape', async () => {
+    callableMocks['generateContent']?.mockRejectedValueOnce(new Error('fail'));
+
     const campaign = makeCampaign();
     const result = await generateMarketingContent(campaign, [makeProduct()]);
 

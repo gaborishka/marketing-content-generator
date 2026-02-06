@@ -9,9 +9,12 @@ import { ContentGenerator } from './components/ContentGenerator';
 import { CampaignDetail } from './components/CampaignDetail';
 import { ComplianceRules } from './components/ComplianceRules';
 import { Product, Campaign, GeneratedContent, ComplianceRule } from './types';
-import { Sparkles, KeyRound, ExternalLink, Loader2 } from 'lucide-react';
+import { Loader2 } from 'lucide-react';
 import * as storage from './services/storageService';
 import { uploadContentImages, isBase64DataUrl } from './services/fileStorage';
+import { AuthScreen } from './components/AuthScreen';
+import { onAuthChange, logOut } from './services/authService';
+import type { User } from 'firebase/auth';
 
 // Seed Data
 const MOCK_PRODUCTS: Product[] = [
@@ -147,12 +150,25 @@ function App() {
   const [contentStore, setContentStore] = useState<GeneratedContent[]>([]);
   const [complianceRules, setComplianceRules] = useState<ComplianceRule[]>([]);
   
-  const [hasApiKey, setHasApiKey] = useState(false);
-  const [checkingKey, setCheckingKey] = useState(true);
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [authLoading, setAuthLoading] = useState(true);
   const [isLoadingData, setIsLoadingData] = useState(true);
 
-  // Load Data from IndexedDB on Mount
+  // Listen for auth state changes
   useEffect(() => {
+    const unsubscribe = onAuthChange((user) => {
+      setCurrentUser(user);
+      setAuthLoading(false);
+    });
+    return unsubscribe;
+  }, []);
+
+  // Load Data from IndexedDB on Mount (only when authenticated)
+  useEffect(() => {
+    if (!currentUser) {
+      setIsLoadingData(false);
+      return;
+    }
     const loadData = async () => {
       try {
         const [dbProducts, dbCampaigns, dbContent, dbComplianceRules] = await Promise.all([
@@ -196,42 +212,7 @@ function App() {
       }
     };
     loadData();
-  }, []);
-
-  // Check for API Key on mount
-  useEffect(() => {
-    const checkKey = async () => {
-      try {
-        if (process.env.API_KEY || process.env.GEMINI_API_KEY) {
-          setHasApiKey(true);
-        } else if ((window as any).aistudio && await (window as any).aistudio.hasSelectedApiKey()) {
-          setHasApiKey(true);
-        }
-      } catch (e) {
-        console.error("Error checking API key:", e);
-      } finally {
-        setCheckingKey(false);
-      }
-    };
-    checkKey();
-  }, []);
-
-  const handleConnectKey = async () => {
-    if ((window as any).aistudio) {
-      try {
-        await (window as any).aistudio.openSelectKey();
-        setHasApiKey(true);
-      } catch (e) {
-        console.error("Key selection failed", e);
-        if (e instanceof Error && e.message.includes("Requested entity was not found")) {
-          setHasApiKey(false);
-          alert("Key selection failed. Please try again.");
-        }
-      }
-    } else {
-      alert("AI Studio environment not detected.");
-    }
-  };
+  }, [currentUser]);
 
   const handleComplianceRuleCreate = (rule: ComplianceRule) => {
     setComplianceRules(prev => [rule, ...prev]);
@@ -314,7 +295,7 @@ function App() {
     }
   };
 
-  if (checkingKey || isLoadingData) {
+  if (authLoading || isLoadingData) {
     return (
       <div className="h-screen flex flex-col items-center justify-center bg-slate-50 text-slate-400">
         <Loader2 className="animate-spin mb-2" size={32} />
@@ -323,50 +304,13 @@ function App() {
     );
   }
 
-  // Key Selection Screen
-  if (!hasApiKey) {
-    return (
-      <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-4">
-        <div className="max-w-md w-full bg-white rounded-2xl shadow-xl border border-slate-200 p-8 text-center">
-          <div className="mx-auto w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center mb-6 text-blue-600">
-            <Sparkles size={32} />
-          </div>
-          
-          <h1 className="text-2xl font-bold text-slate-900 mb-2">Welcome to MarketGen AI</h1>
-          <p className="text-slate-500 mb-8">
-            To generate high-quality marketing assets and images using the latest Gemini Pro models, please connect your Google AI Studio account.
-          </p>
-
-          <button 
-            onClick={handleConnectKey}
-            className="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 px-6 rounded-xl flex items-center justify-center space-x-2 transition-all transform hover:scale-[1.02] shadow-lg shadow-blue-500/20 mb-6"
-          >
-            <KeyRound size={20} />
-            <span>Connect API Key</span>
-          </button>
-
-          <div className="pt-6 border-t border-slate-100">
-             <a 
-               href="https://ai.google.dev/gemini-api/docs/billing" 
-               target="_blank" 
-               rel="noreferrer"
-               className="inline-flex items-center text-sm text-slate-500 hover:text-blue-600 transition-colors"
-             >
-               <span>View Billing Documentation</span>
-               <ExternalLink size={14} className="ml-1" />
-             </a>
-             <p className="text-xs text-slate-400 mt-2">
-               A paid project is required for the full enterprise experience.
-             </p>
-          </div>
-        </div>
-      </div>
-    );
+  if (!currentUser) {
+    return <AuthScreen />;
   }
 
   return (
     <Router>
-      <Layout>
+      <Layout onSignOut={logOut} userName={currentUser.displayName || currentUser.email || 'User'}>
         <Routes>
           <Route path="/" element={<Dashboard />} />
           <Route path="/campaigns" element={<CampaignList campaigns={campaigns} />} />

@@ -2,22 +2,25 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 // Use vi.hoisted so mock fns are available when the hoisted vi.mock factory runs
 const {
-  mockGetStorage,
+  mockStorageInstance,
   mockRef,
   mockUploadString,
   mockGetDownloadURL,
 } = vi.hoisted(() => ({
-  mockGetStorage: vi.fn().mockReturnValue({}),
+  mockStorageInstance: { _mock: true },
   mockRef: vi.fn().mockReturnValue({ fullPath: 'mock/path' }),
   mockUploadString: vi.fn().mockResolvedValue(undefined),
   mockGetDownloadURL: vi.fn().mockResolvedValue('https://firebasestorage.example.com/download'),
 }));
 
 vi.mock('firebase/storage', () => ({
-  getStorage: mockGetStorage,
   ref: mockRef,
   uploadString: mockUploadString,
   getDownloadURL: mockGetDownloadURL,
+}));
+
+vi.mock('../firebase', () => ({
+  storage: mockStorageInstance,
 }));
 
 import { isBase64DataUrl, uploadBase64Image, uploadContentImages } from '../fileStorage';
@@ -64,8 +67,7 @@ describe('uploadBase64Image', () => {
 
     const result = await uploadBase64Image(base64, path);
 
-    expect(mockGetStorage).toHaveBeenCalled();
-    expect(mockRef).toHaveBeenCalledWith({}, path);
+    expect(mockRef).toHaveBeenCalledWith(mockStorageInstance, path);
     expect(mockUploadString).toHaveBeenCalledWith(
       { fullPath: 'mock/path' },
       base64,
@@ -100,7 +102,7 @@ describe('uploadContentImages', () => {
     const result = await uploadContentImages(item);
 
     expect(mockUploadString).toHaveBeenCalledTimes(1);
-    expect(mockRef).toHaveBeenCalledWith({}, 'content/item-1/hero.png');
+    expect(mockRef).toHaveBeenCalledWith(mockStorageInstance, 'content/item-1/hero.png');
     expect(result.imageUrl).toBe('https://firebasestorage.example.com/download');
   });
 
@@ -116,8 +118,8 @@ describe('uploadContentImages', () => {
     const result = await uploadContentImages(item);
 
     expect(mockUploadString).toHaveBeenCalledTimes(2);
-    expect(mockRef).toHaveBeenCalledWith({}, 'content/item-1/scene-1.png');
-    expect(mockRef).toHaveBeenCalledWith({}, 'content/item-1/scene-2.png');
+    expect(mockRef).toHaveBeenCalledWith(mockStorageInstance, 'content/item-1/scene-1.png');
+    expect(mockRef).toHaveBeenCalledWith(mockStorageInstance, 'content/item-1/scene-2.png');
     expect(result.storyboard![0].imageUrl).toBe('https://firebasestorage.example.com/download');
     expect(result.storyboard![1].imageUrl).toBe('https://firebasestorage.example.com/download');
   });

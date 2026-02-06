@@ -1,4 +1,5 @@
-import { getStorage, ref, uploadString, getDownloadURL } from 'firebase/storage';
+import { ref, uploadString, getDownloadURL } from 'firebase/storage';
+import { storage } from './firebase';
 import { GeneratedContent } from '../types';
 
 export const isBase64DataUrl = (url: string): boolean => url.startsWith('data:');
@@ -6,7 +7,6 @@ export const isBase64DataUrl = (url: string): boolean => url.startsWith('data:')
 export const uploadBase64Image = async (base64: string, storagePath: string): Promise<string> => {
   if (!isBase64DataUrl(base64)) return base64;
 
-  const storage = getStorage();
   const storageRef = ref(storage, storagePath);
   await uploadString(storageRef, base64, 'data_url');
   return getDownloadURL(storageRef);

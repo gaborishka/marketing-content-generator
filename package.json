@@ -8,7 +8,13 @@
     "build": "vite build",
     "preview": "vite preview",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "setup": "./scripts/setup-firebase.sh",
+    "deploy": "./scripts/setup-firebase.sh deploy",
+    "deploy:functions": "./scripts/setup-firebase.sh functions",
+    "deploy:rules": "./scripts/setup-firebase.sh rules",
+    "deploy:cors": "./scripts/setup-firebase.sh cors",
+    "deploy:secret": "./scripts/setup-firebase.sh secret"
   },
   "dependencies": {
     "@google/genai": "^1.39.0",
