@@ -199,6 +199,19 @@ export const generateMarketingContent = async (
     `;
   }
 
+  // Build channel × audience combinations (channels are already sub-format names)
+  const combinations: { channel: string; audience: string }[] = [];
+  for (const channel of campaign.channels) {
+    for (const audience of campaign.targetAudiences) {
+      combinations.push({ channel, audience });
+    }
+  }
+  const cappedCombinations = combinations.slice(0, 6);
+
+  const combinationList = cappedCombinations.map((c, i) =>
+    `${i + 1}. Channel: "${c.channel}", Audience: "${c.audience}"`
+  ).join('\n    ');
+
   const prompt = `
     You are an expert marketing copywriter.
 
@@ -208,18 +221,18 @@ export const generateMarketingContent = async (
     ${campaign.attachments.length > 0 ? `Attached Documents (Reference only): ${campaign.attachments.join(', ')}` : ''}
 
     Campaign Goal: ${campaign.description}
-    Target Audiences: ${campaign.targetAudiences.join(", ")}
-    Channels: ${campaign.channels.join(", ")}
     Key Message: ${campaign.keyMessage}
-    
-    Task: Generate marketing content variants.
-    Constraint: Generate a maximum of 6 high-quality distinct variants covering different audience/channel combinations to ensure valid JSON output.
-    
+
+    Task: Generate exactly ${cappedCombinations.length} marketing content items for these combinations:
+    ${combinationList}
+
+    IMPORTANT: The "channel" field in your output must EXACTLY match the channel names listed above.
+
     IMPORTANT for 'Video Storyboard' channel:
     - Instead of simple text, generate a 'storyboard' array with exactly 3 scenes.
     - Each scene must have: sceneNumber, imagePrompt (visual description), voiceover (script).
     - The top-level 'text' field should correspond to the full voiceover script.
-    
+
     Return JSON array.
   `;
 
@@ -343,9 +356,9 @@ export const generateMarketingContent = async (
 const mockGeneration = (campaign: Campaign, allProducts: Product[]): GeneratedContent[] => {
   const generated: GeneratedContent[] = [];
   let count = 0;
-  const maxItems = 5;
+  const maxItems = 6;
   const primary = allProducts.find(p => p.id === campaign.primaryProductId);
-  
+
   for (const channel of campaign.channels) {
     for (const audience of campaign.targetAudiences) {
       if (count >= maxItems) break;

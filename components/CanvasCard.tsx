@@ -14,7 +14,7 @@ import {
   Image as ImageIcon,
   Check
 } from 'lucide-react';
-import { GeneratedContent } from '../types';
+import { GeneratedContent, getParentChannel } from '../types';
 import { TwitterPreview } from './previews/TwitterPreview';
 import { LinkedInPreview } from './previews/LinkedInPreview';
 import { InstagramPreview } from './previews/InstagramPreview';
@@ -166,7 +166,8 @@ const CanvasCardInner: React.FC<CanvasCardProps> = ({
     );
   }
 
-  const isVideoStoryboard = content.channel === 'Video Storyboard';
+  const parentChannel = getParentChannel(content.channel);
+  const isVideoStoryboard = parentChannel === 'Video Storyboard';
 
   return (
     <div
@@ -199,9 +200,9 @@ const CanvasCardInner: React.FC<CanvasCardProps> = ({
           ) : (
             <>
               <div className={`w-2 h-2 rounded-full ${
-                content.channel === 'Twitter' ? 'bg-sky-400' :
-                content.channel === 'LinkedIn' ? 'bg-blue-700' :
-                content.channel === 'Instagram' ? 'bg-pink-500' :
+                parentChannel === 'Twitter' ? 'bg-sky-400' :
+                parentChannel === 'LinkedIn' ? 'bg-blue-700' :
+                parentChannel === 'Instagram' ? 'bg-pink-500' :
                 'bg-slate-400'
               }`} />
               <span className="text-xs font-semibold text-slate-700 uppercase tracking-wide">{content.channel}</span>
@@ -218,15 +219,15 @@ const CanvasCardInner: React.FC<CanvasCardProps> = ({
       </div>
 
       {/* Platform-specific preview for Twitter, LinkedIn, Instagram */}
-      {(content.channel === 'Twitter' || content.channel === 'LinkedIn' || content.channel === 'Instagram') ? (
+      {(parentChannel === 'Twitter' || parentChannel === 'LinkedIn' || parentChannel === 'Instagram') ? (
         <>
-          {content.channel === 'Twitter' && (
+          {parentChannel === 'Twitter' && (
             <TwitterPreview text={content.text} imageUrl={content.imageUrl} brandName={brandName} audience={content.audience} />
           )}
-          {content.channel === 'LinkedIn' && (
+          {parentChannel === 'LinkedIn' && (
             <LinkedInPreview text={content.text} imageUrl={content.imageUrl} brandName={brandName} audience={content.audience} />
           )}
-          {content.channel === 'Instagram' && (
+          {parentChannel === 'Instagram' && (
             <InstagramPreview text={content.text} imageUrl={content.imageUrl} brandName={brandName} audience={content.audience} />
           )}
 

@@ -37,10 +37,11 @@ import {
   Check,
   Paperclip,
   Lightbulb,
-  MousePointerClick
+  MousePointerClick,
+  ChevronRight
 } from 'lucide-react';
 import { useParams, Link } from 'react-router-dom';
-import { Campaign, Product, GeneratedContent, ComplianceRule } from '../types';
+import { Campaign, Product, GeneratedContent, ComplianceRule, CHANNEL_FORMATS, getParentChannel } from '../types';
 import { CanvasBoard } from './CanvasBoard';
 import { generateMarketingContent } from '../services/geminiService';
 import { VideoStoryboardModal } from './VideoStoryboardModal';
@@ -125,6 +126,26 @@ export const CampaignDetail: React.FC<CampaignDetailProps> = ({
     }
   }, [campaign]);
 
+  // Migrate old parent channel names to sub-format names
+  useEffect(() => {
+    if (!campaign) return;
+    const migrated: string[] = [];
+    let needsMigration = false;
+    for (const ch of campaign.channels) {
+      const formats = CHANNEL_FORMATS[ch];
+      if (formats && formats[0] !== ch) {
+        // Parent name (e.g. 'Instagram') → expand to sub-formats
+        migrated.push(...formats);
+        needsMigration = true;
+      } else {
+        migrated.push(ch);
+      }
+    }
+    if (needsMigration) {
+      onUpdateCampaign({ ...campaign, channels: [...new Set(migrated)] });
+    }
+  }, [campaign?.id]);
+
   // Clear status message after 3 seconds
   useEffect(() => {
     if (statusMessage) {
@@ -161,8 +182,16 @@ export const CampaignDetail: React.FC<CampaignDetailProps> = ({
     const newPlaceholders: GeneratedContent[] = [];
     let index = 0;
 
+    // Build channel × audience combinations (channels are already sub-format names)
+    const combinations: { channel: string; audience: string }[] = [];
     for (const channel of campaign.channels) {
       for (const audience of campaign.targetAudiences) {
+        combinations.push({ channel, audience });
+      }
+    }
+
+    // Cap at 6 to match AI generation limit
+    for (const { channel, audience } of combinations.slice(0, 6)) {
          const exists = campaignContent.some(c => c.channel === channel && c.audience === audience);
          if (exists) continue;
 
@@ -181,32 +210,27 @@ export const CampaignDetail: React.FC<CampaignDetailProps> = ({
            width: 320
          });
          index++;
-      }
     }
 
     if (newPlaceholders.length === 0) {
        setStatusMessage("All combinations covered. Generating alternatives...");
-       let count = 0;
-       for (const channel of campaign.channels) {
-         if (count >= 3) break;
-         const audience = campaign.targetAudiences[0] || 'General Public';
-
-         newPlaceholders.push({
-           id: `temp-${Date.now()}-${index}`,
-           campaignId: campaign.id,
-           channel,
-           audience,
-           text: '',
-           complianceScore: 0,
-           riskLevel: 'low',
-           status: 'generating',
-           imageUrl: '',
-           x: startX + (Math.floor(index / 2) * 340),
-           y: 100 + ((index % 2) * 450),
-           width: 320
-         });
-         index++;
-         count++;
+       const audience = campaign.targetAudiences[0] || 'General Public';
+       for (const channel of campaign.channels.slice(0, 3)) {
+           newPlaceholders.push({
+             id: `temp-${Date.now()}-${index}`,
+             campaignId: campaign.id,
+             channel,
+             audience,
+             text: '',
+             complianceScore: 0,
+             riskLevel: 'low',
+             status: 'generating',
+             imageUrl: '',
+             x: startX + (Math.floor(index / 2) * 340),
+             y: 100 + ((index % 2) * 450),
+             width: 320
+           });
+           index++;
        }
     } else {
        setStatusMessage(`Generating ${newPlaceholders.length} missing variants...`);
@@ -320,12 +344,31 @@ export const CampaignDetail: React.FC<CampaignDetailProps> = ({
     onUpdateCampaign({ ...campaign, targetAudiences: next });
   };
 
-  const handleToggleChannel = (ch: string) => {
+  const handleToggleParentChannel = (parentName: string) => {
     if (!campaign) return;
-    const current = campaign.channels;
-    const next = current.includes(ch)
-      ? current.filter(c => c !== ch)
-      : [...current, ch];
+    const subFormats = CHANNEL_FORMATS[parentName] || [parentName];
+    const anySelected = subFormats.some(sf => campaign.channels.includes(sf));
+    // Always strip the parent name itself (stale from old data format)
+    const cleaned = campaign.channels.filter(ch => ch !== parentName);
+    let next: string[];
+    if (anySelected) {
+      // Deselect all sub-formats of this parent
+      next = cleaned.filter(ch => !subFormats.includes(ch));
+    } else {
+      // Select all sub-formats of this parent
+      next = [...cleaned, ...subFormats.filter(sf => !cleaned.includes(sf))];
+    }
+    onUpdateCampaign({ ...campaign, channels: next });
+  };
+
+  const handleToggleSubFormat = (subFormat: string) => {
+    if (!campaign) return;
+    // Strip any stale parent name for this sub-format
+    const parentName = getParentChannel(subFormat);
+    const current = campaign.channels.filter(ch => ch !== parentName || parentName === subFormat);
+    const next = current.includes(subFormat)
+      ? current.filter(ch => ch !== subFormat)
+      : [...current, subFormat];
     onUpdateCampaign({ ...campaign, channels: next });
   };
 
@@ -675,16 +718,19 @@ export const CampaignDetail: React.FC<CampaignDetailProps> = ({
              <div className="flex items-center justify-between mb-3">
                 <h3 className="font-semibold text-slate-900">Channels</h3>
                 <span className="text-[10px] font-medium text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded-full">
-                  {campaign.channels.length} selected
+                  {campaign.channels.length} format{campaign.channels.length !== 1 ? 's' : ''}
                 </span>
              </div>
              <div className="flex flex-wrap gap-2">
-                {AVAILABLE_CHANNELS.map(({ label: ch, icon: Icon, selectedClasses, selectedIconClass }) => {
-                  const isSelected = campaign.channels.includes(ch);
+                {AVAILABLE_CHANNELS.map(({ label: parentName, icon: Icon, selectedClasses, selectedIconClass }) => {
+                  const subFormats = CHANNEL_FORMATS[parentName] || [parentName];
+                  const selectedCount = subFormats.filter(sf => campaign.channels.includes(sf)).length;
+                  const isSelected = selectedCount > 0;
+                  const isMultiFormat = subFormats.length > 1;
                   return (
                     <button
-                      key={ch}
-                      onClick={() => handleToggleChannel(ch)}
+                      key={parentName}
+                      onClick={() => handleToggleParentChannel(parentName)}
                       className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all duration-150 border cursor-pointer ${
                         isSelected
                           ? `${selectedClasses} shadow-sm`
@@ -692,11 +738,52 @@ export const CampaignDetail: React.FC<CampaignDetailProps> = ({
                       }`}
                     >
                       <Icon size={13} className={isSelected ? selectedIconClass : 'text-slate-400'} />
-                      <span>{ch}</span>
+                      <span>{parentName}</span>
+                      {isSelected && isMultiFormat && (
+                        <span className="text-[10px] opacity-70 ml-0.5">{selectedCount}/{subFormats.length}</span>
+                      )}
                     </button>
                   );
                 })}
              </div>
+
+             {/* Sub-format expansion rows */}
+             {AVAILABLE_CHANNELS.map(({ label: parentName, selectedClasses }) => {
+               const subFormats = CHANNEL_FORMATS[parentName] || [parentName];
+               if (subFormats.length <= 1) return null;
+               const selectedCount = subFormats.filter(sf => campaign.channels.includes(sf)).length;
+               if (selectedCount === 0) return null;
+
+               return (
+                 <div key={`sub-${parentName}`} className="mt-3 ml-1">
+                   <div className="flex items-center gap-1 text-[10px] font-semibold text-slate-400 uppercase mb-1.5">
+                     <ChevronRight size={10} />
+                     <span>{parentName} Formats</span>
+                   </div>
+                   <div className="flex flex-wrap gap-1.5 ml-3">
+                     {subFormats.map(sf => {
+                       const isSelected = campaign.channels.includes(sf);
+                       // Strip parent prefix for display: "Instagram Post" → "Post"
+                       const shortName = sf.startsWith(parentName) ? sf.slice(parentName.length).trim() : sf;
+                       return (
+                         <button
+                           key={sf}
+                           onClick={() => handleToggleSubFormat(sf)}
+                           className={`inline-flex items-center gap-1 px-2 py-1 rounded text-[11px] font-medium transition-all duration-150 border cursor-pointer ${
+                             isSelected
+                               ? `${selectedClasses} shadow-sm`
+                               : 'bg-white border-slate-200 text-slate-400 hover:border-slate-300 hover:bg-slate-50'
+                           }`}
+                         >
+                           {isSelected && <Check size={10} />}
+                           <span>{shortName}</span>
+                         </button>
+                       );
+                     })}
+                   </div>
+                 </div>
+               );
+             })}
            </div>
 
            <div className="p-4 mt-auto">
@@ -760,7 +847,7 @@ export const CampaignDetail: React.FC<CampaignDetailProps> = ({
                        : 'bg-slate-50 border-slate-200 text-slate-400'
                    }`}>
                      <Send size={12} />
-                     <span>{campaign.channels.length} channel{campaign.channels.length !== 1 ? 's' : ''}</span>
+                     <span>{campaign.channels.length} format{campaign.channels.length !== 1 ? 's' : ''}</span>
                      {campaign.channels.length > 0 && <Check size={12} />}
                    </div>
                  </div>

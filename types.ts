@@ -99,3 +99,23 @@ export interface ChartData {
   name: string;
   value: number;
 }
+
+export const CHANNEL_FORMATS: Record<string, string[]> = {
+  'Email': ['Email Newsletter'],
+  'LinkedIn': ['LinkedIn Post', 'LinkedIn Article'],
+  'Twitter': ['Tweet', 'Twitter Thread'],
+  'Instagram': ['Instagram Post', 'Instagram Reel', 'Instagram Story', 'Instagram Carousel'],
+  'Web': ['Web Banner', 'Blog Post'],
+  'TikTok': ['TikTok Video'],
+  'Facebook': ['Facebook Post', 'Facebook Ad'],
+  'YouTube': ['YouTube Video', 'YouTube Short'],
+  'Pinterest': ['Pinterest Pin'],
+  'Video Storyboard': ['Video Storyboard'],
+};
+
+export function getParentChannel(subFormat: string): string {
+  for (const [parent, formats] of Object.entries(CHANNEL_FORMATS)) {
+    if (formats.includes(subFormat)) return parent;
+  }
+  return subFormat;
+}

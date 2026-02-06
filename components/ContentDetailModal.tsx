@@ -17,7 +17,7 @@ import {
   Type,
   AlignLeft
 } from 'lucide-react';
-import { GeneratedContent } from '../types';
+import { GeneratedContent, getParentChannel } from '../types';
 
 interface ContentDetailModalProps {
   content: GeneratedContent;
@@ -43,12 +43,13 @@ export const ContentDetailModal: React.FC<ContentDetailModalProps> = ({ content,
   const [storyboardTexts, setStoryboardTexts] = useState<string[]>(
     content.storyboard?.map(s => s.voiceover) || []
   );
-  const isVideoStoryboard = content.channel === 'Video Storyboard';
+  const parentChannel = getParentChannel(content.channel);
+  const isVideoStoryboard = parentChannel === 'Video Storyboard';
   const hasChanges = isVideoStoryboard
     ? content.storyboard?.some((s, i) => s.voiceover !== storyboardTexts[i])
     : text !== content.text;
 
-  const channelCfg = CHANNEL_CONFIG[content.channel] || { icon: AlignLeft, color: 'text-slate-600', bg: 'bg-slate-50' };
+  const channelCfg = CHANNEL_CONFIG[parentChannel] || { icon: AlignLeft, color: 'text-slate-600', bg: 'bg-slate-50' };
   const ChannelIcon = channelCfg.icon;
 
   useEffect(() => {
