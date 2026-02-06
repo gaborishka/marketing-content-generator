@@ -12,6 +12,7 @@ import {
   FileText,
   Package,
   Info,
+  ShieldCheck,
   Users,
   GraduationCap,
   Heart,
@@ -30,10 +31,17 @@ import {
   Facebook,
   Youtube,
   Image,
-  Tv
+  Tv,
+  Pencil,
+  X,
+  Check,
+  Paperclip,
+  Lightbulb,
+  MousePointerClick,
+  ChevronRight
 } from 'lucide-react';
 import { useParams, Link } from 'react-router-dom';
-import { Campaign, Product, GeneratedContent } from '../types';
+import { Campaign, Product, GeneratedContent, ComplianceRule, CHANNEL_FORMATS, getParentChannel } from '../types';
 import { CanvasBoard } from './CanvasBoard';
 import { generateMarketingContent } from '../services/geminiService';
 import { VideoStoryboardModal } from './VideoStoryboardModal';
@@ -42,6 +50,7 @@ import { ContentDetailModal } from './ContentDetailModal';
 interface CampaignDetailProps {
   campaigns: Campaign[];
   products: Product[];
+  complianceRules: ComplianceRule[];
   contentStore: GeneratedContent[];
   onUpdateContent: (content: GeneratedContent[]) => void;
   onUpdateCampaign: (campaign: Campaign) => void;
@@ -80,10 +89,11 @@ const AVAILABLE_CHANNELS: ChipOption[] = [
   { label: 'Video Storyboard', icon: Video, selectedClasses: 'bg-violet-50 border-violet-300 text-violet-700 ring-1 ring-violet-200', selectedIconClass: 'text-violet-500' },
 ];
 
-export const CampaignDetail: React.FC<CampaignDetailProps> = ({ 
-  campaigns, 
-  products, 
-  contentStore, 
+export const CampaignDetail: React.FC<CampaignDetailProps> = ({
+  campaigns,
+  products,
+  complianceRules,
+  contentStore,
   onUpdateContent,
   onUpdateCampaign,
   onUpdateItem
@@ -94,23 +104,49 @@ export const CampaignDetail: React.FC<CampaignDetailProps> = ({
   const [detailContentId, setDetailContentId] = useState<string | null>(null);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [canvasFocusTarget, setCanvasFocusTarget] = useState<{ x: number; y: number; timestamp: number } | null>(null);
-  
+
   const campaign = campaigns.find(c => c.id === id);
   const primaryProduct = products.find(p => p.id === campaign?.primaryProductId);
   const secondaryProducts = products.filter(p => campaign?.secondaryProductIds.includes(p.id));
   const brandName = primaryProduct?.brand || campaign?.name || 'Your Brand';
+  const complianceRule = complianceRules.find(r => r.id === campaign?.complianceRuleId);
 
   // Local state for inputs
   const [keyMessageInput, setKeyMessageInput] = useState('');
   const [contextInput, setContextInput] = useState('');
+  const [nameInput, setNameInput] = useState('');
+  const [isEditingProducts, setIsEditingProducts] = useState(false);
+  const [isBrandMode, setIsBrandMode] = useState(false);
 
-  // Sync state when campaign loads
+  // Sync state when campaign loads (only on campaign ID change to avoid resetting during edits)
   useEffect(() => {
     if (campaign) {
       setKeyMessageInput(campaign.keyMessage);
       setContextInput(campaign.context || '');
+      setNameInput(campaign.name);
+      setIsBrandMode(!campaign.primaryProductId);
     }
-  }, [campaign]);
+  }, [campaign?.id]);
+
+  // Migrate old parent channel names to sub-format names
+  useEffect(() => {
+    if (!campaign) return;
+    const migrated: string[] = [];
+    let needsMigration = false;
+    for (const ch of campaign.channels) {
+      const formats = CHANNEL_FORMATS[ch];
+      if (formats && formats[0] !== ch) {
+        // Parent name (e.g. 'Instagram') → expand to sub-formats
+        migrated.push(...formats);
+        needsMigration = true;
+      } else {
+        migrated.push(ch);
+      }
+    }
+    if (needsMigration) {
+      onUpdateCampaign({ ...campaign, channels: [...new Set(migrated)] });
+    }
+  }, [campaign?.id, onUpdateCampaign]);
 
   // Clear status message after 3 seconds
   useEffect(() => {
@@ -125,32 +161,39 @@ export const CampaignDetail: React.FC<CampaignDetailProps> = ({
   const activeEditingContent = contentStore.find(c => c.id === editingContentId);
   const activeDetailContent = contentStore.find(c => c.id === detailContentId);
 
+  // Generate button validation
+  const canGenerate = campaign ? campaign.targetAudiences.length > 0 && campaign.channels.length > 0 : false;
+
   const handleCanvasUpdate = (updatedItems: GeneratedContent[]) => {
-    // Update the global store (merging updated items with other campaign items)
     const otherContent = contentStore.filter(c => c.campaignId !== id);
     onUpdateContent([...otherContent, ...updatedItems]);
   };
 
   const handleGenerateMore = async () => {
     if (!campaign) return;
-    
+
     setIsGenerating(true);
     setStatusMessage(null);
 
-    // 1. Calculate start position for new cards
     let startX = 50;
     if (campaignContent.length > 0) {
       const maxX = Math.max(...campaignContent.map(c => c.x));
-      startX = maxX + 400; // 400px gap
+      startX = maxX + 400;
     }
 
-    // 2. Create Placeholder Cards
     const newPlaceholders: GeneratedContent[] = [];
     let index = 0;
 
-    // First pass: Fill missing combinations
+    // Build channel × audience combinations (channels are already sub-format names)
+    const combinations: { channel: string; audience: string }[] = [];
     for (const channel of campaign.channels) {
       for (const audience of campaign.targetAudiences) {
+        combinations.push({ channel, audience });
+      }
+    }
+
+    // Cap at 6 to match AI generation limit
+    for (const { channel, audience } of combinations.slice(0, 6)) {
          const exists = campaignContent.some(c => c.channel === channel && c.audience === audience);
          if (exists) continue;
 
@@ -169,33 +212,27 @@ export const CampaignDetail: React.FC<CampaignDetailProps> = ({
            width: 320
          });
          index++;
-      }
     }
 
-    // Fallback: If no gaps, generate alternatives for each channel (using first audience)
     if (newPlaceholders.length === 0) {
        setStatusMessage("All combinations covered. Generating alternatives...");
-       let count = 0;
-       for (const channel of campaign.channels) {
-         if (count >= 3) break; // Limit to 3 to prevent clutter
-         const audience = campaign.targetAudiences[0] || 'General Public';
-         
-         newPlaceholders.push({
-           id: `temp-${Date.now()}-${index}`,
-           campaignId: campaign.id,
-           channel,
-           audience,
-           text: '',
-           complianceScore: 0,
-           riskLevel: 'low',
-           status: 'generating',
-           imageUrl: '',
-           x: startX + (Math.floor(index / 2) * 340),
-           y: 100 + ((index % 2) * 450),
-           width: 320
-         });
-         index++;
-         count++;
+       const audience = campaign.targetAudiences[0] || 'General Public';
+       for (const channel of campaign.channels.slice(0, 3)) {
+           newPlaceholders.push({
+             id: `temp-${Date.now()}-${index}`,
+             campaignId: campaign.id,
+             channel,
+             audience,
+             text: '',
+             complianceScore: 0,
+             riskLevel: 'low',
+             status: 'generating',
+             imageUrl: '',
+             x: startX + (Math.floor(index / 2) * 340),
+             y: 100 + ((index % 2) * 450),
+             width: 320
+           });
+           index++;
        }
     } else {
        setStatusMessage(`Generating ${newPlaceholders.length} missing variants...`);
@@ -209,7 +246,6 @@ export const CampaignDetail: React.FC<CampaignDetailProps> = ({
 
     onUpdateContent([...contentStore, ...newPlaceholders]);
 
-    // Focus canvas on the new placeholder area
     if (newPlaceholders.length > 0) {
       const avgX = newPlaceholders.reduce((sum, p) => sum + p.x, 0) / newPlaceholders.length + 160;
       const avgY = newPlaceholders.reduce((sum, p) => sum + p.y, 0) / newPlaceholders.length + 200;
@@ -217,24 +253,22 @@ export const CampaignDetail: React.FC<CampaignDetailProps> = ({
     }
 
     try {
-      // 3. Call API
       const results = await generateMarketingContent(
-        campaign, 
-        products, // Pass all products
+        campaign,
+        products,
+        complianceRule,
         (updatedContentItem) => {
           onUpdateItem(updatedContentItem);
         }
       );
-      
-      // 4. Merge results
+
       const filledPlaceholders: GeneratedContent[] = [];
       const usedResultsIndices = new Set<number>();
 
       newPlaceholders.forEach(placeholder => {
-        // Find a result that matches channel/audience and hasn't been used
-        const resultIndex = results.findIndex((r, idx) => 
-          r.channel === placeholder.channel && 
-          r.audience === placeholder.audience && 
+        const resultIndex = results.findIndex((r, idx) =>
+          r.channel === placeholder.channel &&
+          r.audience === placeholder.audience &&
           !usedResultsIndices.has(idx)
         );
 
@@ -242,27 +276,25 @@ export const CampaignDetail: React.FC<CampaignDetailProps> = ({
           usedResultsIndices.add(resultIndex);
           const match = results[resultIndex];
           filledPlaceholders.push({
-            ...match, 
-            x: placeholder.x, 
+            ...match,
+            x: placeholder.x,
             y: placeholder.y,
             width: placeholder.width,
-            id: match.id 
+            id: match.id
           });
         } else {
-          // If no specific match, try to use any unused result (fallback)
            const anyResultIndex = results.findIndex((r, idx) => !usedResultsIndices.has(idx));
            if (anyResultIndex !== -1) {
               usedResultsIndices.add(anyResultIndex);
               const match = results[anyResultIndex];
                filledPlaceholders.push({
-                ...match, 
-                x: placeholder.x, 
+                ...match,
+                x: placeholder.x,
                 y: placeholder.y,
                 width: placeholder.width,
-                id: match.id 
+                id: match.id
               });
            } else {
-              // Failure case
               filledPlaceholders.push({
                 ...placeholder,
                 status: 'draft',
@@ -274,8 +306,13 @@ export const CampaignDetail: React.FC<CampaignDetailProps> = ({
       });
 
       const placeholderIds = newPlaceholders.map(p => p.id);
-      const contentKeep = contentStore.filter(c => !placeholderIds.includes(c.id)); 
+      const contentKeep = contentStore.filter(c => !placeholderIds.includes(c.id));
       onUpdateContent([...contentKeep, ...filledPlaceholders]);
+
+      // Update campaign status after successful generation
+      if (campaign.status === 'draft') {
+        onUpdateCampaign({ ...campaign, status: 'review', progress: 50 });
+      }
 
     } catch (error) {
       console.error("Failed to generate content:", error);
@@ -284,6 +321,12 @@ export const CampaignDetail: React.FC<CampaignDetailProps> = ({
       setStatusMessage("Generation failed. Please try again.");
     } finally {
       setIsGenerating(false);
+    }
+  };
+
+  const handleNameBlur = () => {
+    if (campaign && nameInput.trim() !== '' && nameInput !== campaign.name) {
+      onUpdateCampaign({ ...campaign, name: nameInput });
     }
   };
 
@@ -302,19 +345,80 @@ export const CampaignDetail: React.FC<CampaignDetailProps> = ({
   const handleToggleAudience = (aud: string) => {
     if (!campaign) return;
     const current = campaign.targetAudiences;
-    const next = current.includes(aud) 
+    const next = current.includes(aud)
       ? current.filter(a => a !== aud)
       : [...current, aud];
     onUpdateCampaign({ ...campaign, targetAudiences: next });
   };
 
-  const handleToggleChannel = (ch: string) => {
+  const handleToggleParentChannel = (parentName: string) => {
     if (!campaign) return;
-    const current = campaign.channels;
-    const next = current.includes(ch) 
-      ? current.filter(c => c !== ch)
-      : [...current, ch];
+    const subFormats = CHANNEL_FORMATS[parentName] || [parentName];
+    const anySelected = subFormats.some(sf => campaign.channels.includes(sf));
+    // Always strip the parent name itself (stale from old data format)
+    const cleaned = campaign.channels.filter(ch => ch !== parentName);
+    let next: string[];
+    if (anySelected) {
+      // Deselect all sub-formats of this parent
+      next = cleaned.filter(ch => !subFormats.includes(ch));
+    } else {
+      // Select all sub-formats of this parent
+      next = [...cleaned, ...subFormats.filter(sf => !cleaned.includes(sf))];
+    }
     onUpdateCampaign({ ...campaign, channels: next });
+  };
+
+  const handleToggleSubFormat = (subFormat: string) => {
+    if (!campaign) return;
+    // Strip any stale parent name for this sub-format
+    const parentName = getParentChannel(subFormat);
+    const current = campaign.channels.filter(ch => ch !== parentName || parentName === subFormat);
+    const next = current.includes(subFormat)
+      ? current.filter(ch => ch !== subFormat)
+      : [...current, subFormat];
+    onUpdateCampaign({ ...campaign, channels: next });
+  };
+
+  const handleSetPrimary = (productId: string) => {
+    if (!campaign) return;
+    setIsBrandMode(false);
+    const newSecondary = campaign.secondaryProductIds.filter(id => id !== productId);
+    onUpdateCampaign({ ...campaign, primaryProductId: productId, secondaryProductIds: newSecondary });
+  };
+
+  const handleToggleSecondary = (productId: string) => {
+    if (!campaign) return;
+    if (campaign.primaryProductId === productId) return;
+    const current = campaign.secondaryProductIds;
+    const next = current.includes(productId)
+      ? current.filter(id => id !== productId)
+      : [...current, productId];
+    onUpdateCampaign({ ...campaign, secondaryProductIds: next });
+  };
+
+  const handleBrandCampaignToggle = () => {
+    if (!campaign) return;
+    if (!isBrandMode) {
+      // Switch to brand campaign
+      setIsBrandMode(true);
+      onUpdateCampaign({ ...campaign, primaryProductId: undefined, secondaryProductIds: [] });
+    } else {
+      // Exit brand mode — user can now select a product from the list below
+      setIsBrandMode(false);
+    }
+  };
+
+  const handleRemoveAttachment = (idx: number) => {
+    if (!campaign) return;
+    const next = campaign.attachments.filter((_, i) => i !== idx);
+    onUpdateCampaign({ ...campaign, attachments: next });
+  };
+
+  const handleAddAttachment = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!campaign || !e.target.files || e.target.files.length === 0) return;
+    const newNames = Array.from(e.target.files).map(f => f.name);
+    onUpdateCampaign({ ...campaign, attachments: [...campaign.attachments, ...newNames] });
+    e.target.value = '';
   };
 
   if (!campaign) {
@@ -363,7 +467,19 @@ export const CampaignDetail: React.FC<CampaignDetailProps> = ({
       <div className="flex flex-1 overflow-hidden">
         {/* Left Sidebar Controls */}
         <div className="w-80 bg-white border-r border-slate-200 flex flex-col shrink-0 z-10 overflow-y-auto">
-           
+
+           {/* Section: Campaign Name */}
+           <div className="p-4 border-b border-slate-100">
+              <label className="text-xs font-semibold text-slate-500 uppercase block mb-1">Campaign Name</label>
+              <input
+                type="text"
+                className="w-full p-2 bg-slate-50 border border-slate-200 rounded text-sm font-semibold text-slate-900 focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
+                value={nameInput}
+                onChange={(e) => setNameInput(e.target.value)}
+                onBlur={handleNameBlur}
+              />
+           </div>
+
            {/* Section: Context */}
            <div className="p-4 border-b border-slate-100">
               <div className="flex items-center justify-between mb-2">
@@ -378,56 +494,158 @@ export const CampaignDetail: React.FC<CampaignDetailProps> = ({
                  onBlur={handleContextBlur}
                  placeholder="Campaign context..."
                />
-               
-               {campaign.attachments.length > 0 && (
-                 <div className="space-y-1">
+
+               {/* Attachments with add/remove */}
+               <div className="space-y-1">
+                 <div className="flex items-center justify-between">
                    <span className="text-xs font-semibold text-slate-500 uppercase">Attachments</span>
-                   {campaign.attachments.map((file, i) => (
-                     <div key={i} className="flex items-center text-xs text-blue-600 bg-blue-50 p-1.5 rounded">
-                       <FileText size={12} className="mr-1.5" />
-                       <span className="truncate">{file}</span>
-                     </div>
-                   ))}
+                   <label className="text-xs text-blue-600 hover:text-blue-700 cursor-pointer font-medium flex items-center">
+                     <Paperclip size={11} className="mr-0.5" />
+                     Add
+                     <input
+                       type="file"
+                       multiple
+                       className="hidden"
+                       onChange={handleAddAttachment}
+                     />
+                   </label>
                  </div>
-               )}
+                 {campaign.attachments.length > 0 ? (
+                   campaign.attachments.map((file, i) => (
+                     <div key={i} className="flex items-center justify-between text-xs text-blue-600 bg-blue-50 p-1.5 rounded group">
+                       <div className="flex items-center min-w-0">
+                         <FileText size={12} className="mr-1.5 shrink-0" />
+                         <span className="truncate">{file}</span>
+                       </div>
+                       <button
+                         onClick={() => handleRemoveAttachment(i)}
+                         className="text-slate-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity shrink-0 ml-1"
+                       >
+                         <X size={12} />
+                       </button>
+                     </div>
+                   ))
+                 ) : (
+                   <div className="text-xs text-slate-400 py-1">No attachments</div>
+                 )}
+               </div>
            </div>
 
            {/* Section: Products */}
            <div className="p-4 border-b border-slate-100">
-             <h3 className="font-semibold text-slate-900 mb-3">Products</h3>
-             
-             {primaryProduct ? (
-               <div className="bg-white border border-blue-200 rounded-lg p-3 shadow-sm mb-3 relative overflow-hidden group">
-                 <div className="absolute top-0 right-0 bg-blue-600 text-white text-[10px] px-1.5 py-0.5 rounded-bl font-bold">PRIMARY</div>
-                 <div className="flex items-center space-x-2">
-                   <div className="w-8 h-8 bg-slate-100 rounded object-cover flex-shrink-0">
-                      <img src={primaryProduct.imageUrl} className="w-full h-full rounded object-cover" />
-                   </div>
-                   <div className="min-w-0">
-                     <div className="font-semibold text-sm text-slate-800 truncate">{primaryProduct.name}</div>
-                     <div className="text-[10px] text-slate-500">{primaryProduct.brand}</div>
-                   </div>
-                 </div>
+             <div className="flex items-center justify-between mb-3">
+               <h3 className="font-semibold text-slate-900">Products</h3>
+               <button
+                 onClick={() => setIsEditingProducts(!isEditingProducts)}
+                 className="text-xs text-blue-600 hover:text-blue-700 font-medium flex items-center"
+               >
+                 {isEditingProducts ? (
+                   <><Check size={12} className="mr-0.5" /> Done</>
+                 ) : (
+                   <><Pencil size={12} className="mr-0.5" /> Edit</>
+                 )}
+               </button>
+             </div>
+
+             {isEditingProducts ? (
+               <div className="space-y-2">
+                 {/* Brand Campaign Toggle */}
+                 <button
+                   onClick={handleBrandCampaignToggle}
+                   className={`w-full flex items-center space-x-2 px-3 py-2 rounded-lg border text-xs transition-all ${
+                     isBrandMode
+                       ? 'border-purple-300 bg-purple-50 text-purple-700'
+                       : 'border-slate-200 bg-white text-slate-600 hover:border-purple-200'
+                   }`}
+                 >
+                   <Lightbulb size={13} className={isBrandMode ? 'text-purple-500' : 'text-slate-400'} />
+                   <span className="font-medium">Brand / Idea Campaign</span>
+                 </button>
+
+                 {/* Product List */}
+                 {products.map(p => {
+                   const isPrimary = campaign.primaryProductId === p.id;
+                   const isSecondary = campaign.secondaryProductIds.includes(p.id);
+                   return (
+                     <div key={p.id} className={`p-2 rounded-lg border transition-all ${
+                       isPrimary ? 'border-blue-200 bg-blue-50' :
+                       isSecondary ? 'border-indigo-200 bg-indigo-50' :
+                       'border-slate-100 bg-white'
+                     }`}>
+                       <div className="flex items-center space-x-2 mb-2">
+                         <img src={p.imageUrl} alt={p.name} className="w-6 h-6 rounded object-cover" />
+                         <span className="text-xs font-semibold text-slate-800 truncate">{p.name}</span>
+                       </div>
+                       <div className="flex gap-1.5">
+                         <button
+                           onClick={() => handleSetPrimary(p.id)}
+                           className={`flex-1 text-[10px] py-1 rounded font-medium transition-colors ${
+                             isPrimary
+                               ? 'bg-blue-600 text-white'
+                               : 'bg-slate-100 text-slate-500 hover:bg-blue-100 hover:text-blue-600'
+                           }`}
+                         >
+                           Primary
+                         </button>
+                         <button
+                           onClick={() => handleToggleSecondary(p.id)}
+                           disabled={isPrimary}
+                           className={`flex-1 text-[10px] py-1 rounded font-medium transition-colors ${
+                             isSecondary
+                               ? 'bg-indigo-600 text-white'
+                               : isPrimary
+                                 ? 'bg-slate-50 text-slate-300 cursor-not-allowed'
+                                 : 'bg-slate-100 text-slate-500 hover:bg-indigo-100 hover:text-indigo-600'
+                           }`}
+                         >
+                           Secondary
+                         </button>
+                       </div>
+                     </div>
+                   );
+                 })}
                </div>
              ) : (
-                <div className="bg-purple-50 border border-purple-100 p-3 rounded-lg text-xs text-purple-700 flex items-center mb-3">
-                   <Package size={14} className="mr-2" />
-                   <span>Brand / Idea Campaign</span>
-                </div>
-             )}
-
-             {secondaryProducts.length > 0 && (
-               <div className="space-y-2">
-                 <div className="text-[10px] font-bold text-slate-400 uppercase">Secondary</div>
-                 {secondaryProducts.map(p => (
-                   <div key={p.id} className="flex items-center space-x-2 p-2 bg-slate-50 rounded border border-slate-100">
-                      <div className="w-5 h-5 bg-slate-200 rounded flex-shrink-0">
-                         <img src={p.imageUrl} className="w-full h-full rounded object-cover" />
-                      </div>
-                      <span className="text-xs text-slate-700 truncate">{p.name}</span>
+               <>
+                 {primaryProduct ? (
+                   <div className="bg-white border border-blue-200 rounded-lg p-3 shadow-sm mb-3 relative overflow-hidden group">
+                     <div className="absolute top-0 right-0 bg-blue-600 text-white text-[10px] px-1.5 py-0.5 rounded-bl font-bold">PRIMARY</div>
+                     <div className="flex items-center space-x-2">
+                       <div className="w-8 h-8 bg-slate-100 rounded object-cover flex-shrink-0">
+                          <img src={primaryProduct.imageUrl} alt={primaryProduct.name} className="w-full h-full rounded object-cover" />
+                       </div>
+                       <div className="min-w-0">
+                         <div className="font-semibold text-sm text-slate-800 truncate">{primaryProduct.name}</div>
+                         <div className="text-[10px] text-slate-500">{primaryProduct.brand}</div>
+                       </div>
+                     </div>
                    </div>
-                 ))}
-               </div>
+                 ) : isBrandMode ? (
+                    <div className="bg-purple-50 border border-purple-100 p-3 rounded-lg text-xs text-purple-700 flex items-center mb-3">
+                       <Package size={14} className="mr-2" />
+                       <span>Brand / Idea Campaign</span>
+                    </div>
+                 ) : (
+                    <div className="bg-slate-50 border border-slate-200 p-3 rounded-lg text-xs text-slate-500 flex items-center mb-3">
+                       <Package size={14} className="mr-2" />
+                       <span>No product selected</span>
+                    </div>
+                 )}
+
+                 {secondaryProducts.length > 0 && (
+                   <div className="space-y-2">
+                     <div className="text-[10px] font-bold text-slate-400 uppercase">Secondary</div>
+                     {secondaryProducts.map(p => (
+                       <div key={p.id} className="flex items-center space-x-2 p-2 bg-slate-50 rounded border border-slate-100">
+                          <div className="w-5 h-5 bg-slate-200 rounded flex-shrink-0">
+                             <img src={p.imageUrl} alt={p.name} className="w-full h-full rounded object-cover" />
+                          </div>
+                          <span className="text-xs text-slate-700 truncate">{p.name}</span>
+                       </div>
+                     ))}
+                   </div>
+                 )}
+               </>
              )}
            </div>
 
@@ -441,6 +659,45 @@ export const CampaignDetail: React.FC<CampaignDetailProps> = ({
                  onChange={(e) => setKeyMessageInput(e.target.value)}
                  onBlur={handleKeyMessageBlur}
                />
+           </div>
+
+           {/* Section: Compliance Rule */}
+           <div className="p-4 border-b border-slate-100">
+             <label className="text-xs font-semibold text-slate-500 uppercase block mb-2">Compliance Rule</label>
+             {complianceRule ? (
+               <div className="flex items-center justify-between bg-green-50 border border-green-200 rounded-lg p-2.5">
+                 <div className="flex items-center space-x-2 min-w-0">
+                   <ShieldCheck size={14} className="text-green-600 shrink-0" />
+                   <div className="min-w-0">
+                     <div className="text-sm font-medium text-green-800 truncate">{complianceRule.name}</div>
+                     {complianceRule.description && (
+                       <div className="text-[10px] text-green-600 truncate">{complianceRule.description}</div>
+                     )}
+                   </div>
+                 </div>
+                 <button
+                   onClick={() => campaign && onUpdateCampaign({ ...campaign, complianceRuleId: undefined })}
+                   className="text-xs text-red-500 hover:text-red-700 font-medium shrink-0 ml-2"
+                 >
+                   Remove
+                 </button>
+               </div>
+             ) : (
+               <select
+                 className="w-full p-2 bg-slate-50 border border-slate-200 rounded text-xs text-slate-700 focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
+                 value=""
+                 onChange={(e) => {
+                   if (campaign && e.target.value) {
+                     onUpdateCampaign({ ...campaign, complianceRuleId: e.target.value });
+                   }
+                 }}
+               >
+                 <option value="">No compliance rule</option>
+                 {complianceRules.map(r => (
+                   <option key={r.id} value={r.id}>{r.name}</option>
+                 ))}
+               </select>
+             )}
            </div>
 
            {/* Section: Target Audiences */}
@@ -478,16 +735,19 @@ export const CampaignDetail: React.FC<CampaignDetailProps> = ({
              <div className="flex items-center justify-between mb-3">
                 <h3 className="font-semibold text-slate-900">Channels</h3>
                 <span className="text-[10px] font-medium text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded-full">
-                  {campaign.channels.length} selected
+                  {campaign.channels.length} format{campaign.channels.length !== 1 ? 's' : ''}
                 </span>
              </div>
              <div className="flex flex-wrap gap-2">
-                {AVAILABLE_CHANNELS.map(({ label: ch, icon: Icon, selectedClasses, selectedIconClass }) => {
-                  const isSelected = campaign.channels.includes(ch);
+                {AVAILABLE_CHANNELS.map(({ label: parentName, icon: Icon, selectedClasses, selectedIconClass }) => {
+                  const subFormats = CHANNEL_FORMATS[parentName] || [parentName];
+                  const selectedCount = subFormats.filter(sf => campaign.channels.includes(sf)).length;
+                  const isSelected = selectedCount > 0;
+                  const isMultiFormat = subFormats.length > 1;
                   return (
                     <button
-                      key={ch}
-                      onClick={() => handleToggleChannel(ch)}
+                      key={parentName}
+                      onClick={() => handleToggleParentChannel(parentName)}
                       className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all duration-150 border cursor-pointer ${
                         isSelected
                           ? `${selectedClasses} shadow-sm`
@@ -495,11 +755,52 @@ export const CampaignDetail: React.FC<CampaignDetailProps> = ({
                       }`}
                     >
                       <Icon size={13} className={isSelected ? selectedIconClass : 'text-slate-400'} />
-                      <span>{ch}</span>
+                      <span>{parentName}</span>
+                      {isSelected && isMultiFormat && (
+                        <span className="text-[10px] opacity-70 ml-0.5">{selectedCount}/{subFormats.length}</span>
+                      )}
                     </button>
                   );
                 })}
              </div>
+
+             {/* Sub-format expansion rows */}
+             {AVAILABLE_CHANNELS.map(({ label: parentName, selectedClasses }) => {
+               const subFormats = CHANNEL_FORMATS[parentName] || [parentName];
+               if (subFormats.length <= 1) return null;
+               const selectedCount = subFormats.filter(sf => campaign.channels.includes(sf)).length;
+               if (selectedCount === 0) return null;
+
+               return (
+                 <div key={`sub-${parentName}`} className="mt-3 ml-1">
+                   <div className="flex items-center gap-1 text-[10px] font-semibold text-slate-400 uppercase mb-1.5">
+                     <ChevronRight size={10} />
+                     <span>{parentName} Formats</span>
+                   </div>
+                   <div className="flex flex-wrap gap-1.5 ml-3">
+                     {subFormats.map(sf => {
+                       const isSelected = campaign.channels.includes(sf);
+                       // Strip parent prefix for display: "Instagram Post" → "Post"
+                       const shortName = sf.startsWith(parentName) ? sf.slice(parentName.length).trim() : sf;
+                       return (
+                         <button
+                           key={sf}
+                           onClick={() => handleToggleSubFormat(sf)}
+                           className={`inline-flex items-center gap-1 px-2 py-1 rounded text-[11px] font-medium transition-all duration-150 border cursor-pointer ${
+                             isSelected
+                               ? `${selectedClasses} shadow-sm`
+                               : 'bg-white border-slate-200 text-slate-400 hover:border-slate-300 hover:bg-slate-50'
+                           }`}
+                         >
+                           {isSelected && <Check size={10} />}
+                           <span>{shortName}</span>
+                         </button>
+                       );
+                     })}
+                   </div>
+                 </div>
+               );
+             })}
            </div>
 
            <div className="p-4 mt-auto">
@@ -509,9 +810,15 @@ export const CampaignDetail: React.FC<CampaignDetailProps> = ({
                  <span>{statusMessage}</span>
                </div>
              )}
-             <button 
+             {!canGenerate && !isGenerating && (
+               <div className="mb-2 p-2 bg-amber-50 text-amber-700 text-xs rounded border border-amber-100 flex items-start">
+                 <Info size={14} className="mr-1.5 mt-0.5 shrink-0" />
+                 <span>Select at least 1 audience and 1 channel to generate</span>
+               </div>
+             )}
+             <button
                onClick={handleGenerateMore}
-               disabled={isGenerating}
+               disabled={isGenerating || !canGenerate}
                className="w-full bg-blue-600 hover:bg-blue-700 text-white py-2.5 rounded-lg font-medium flex items-center justify-center space-x-2 transition-colors shadow-lg shadow-blue-500/20 disabled:opacity-70 disabled:cursor-not-allowed"
              >
                {isGenerating ? (
@@ -531,14 +838,48 @@ export const CampaignDetail: React.FC<CampaignDetailProps> = ({
 
         {/* Main Canvas Area */}
         <div className="flex-1 relative">
-           <CanvasBoard
-              items={campaignContent}
-              onItemsChange={handleCanvasUpdate}
-              onEdit={(id) => setEditingContentId(id)}
-              onDoubleClick={(id) => setDetailContentId(id)}
-              brandName={brandName}
-              focusTarget={canvasFocusTarget}
-           />
+           {campaignContent.length === 0 && !isGenerating ? (
+             <div className="absolute inset-0 flex items-center justify-center">
+               <div className="text-center max-w-md px-8">
+                 <div className="inline-flex items-center justify-center w-16 h-16 bg-slate-100 rounded-full mb-4">
+                   <MousePointerClick size={28} className="text-slate-400" />
+                 </div>
+                 <h2 className="text-xl font-bold text-slate-700 mb-2">Ready to generate content</h2>
+                 <p className="text-sm text-slate-500 mb-6">
+                   Select your target audiences and channels in the sidebar, then click "Generate New Variants" to populate the canvas with AI-generated content.
+                 </p>
+                 <div className="flex items-center justify-center gap-3 text-xs">
+                   <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full border ${
+                     campaign.targetAudiences.length > 0
+                       ? 'bg-green-50 border-green-200 text-green-700'
+                       : 'bg-slate-50 border-slate-200 text-slate-400'
+                   }`}>
+                     <Users size={12} />
+                     <span>{campaign.targetAudiences.length} audience{campaign.targetAudiences.length !== 1 ? 's' : ''}</span>
+                     {campaign.targetAudiences.length > 0 && <Check size={12} />}
+                   </div>
+                   <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full border ${
+                     campaign.channels.length > 0
+                       ? 'bg-green-50 border-green-200 text-green-700'
+                       : 'bg-slate-50 border-slate-200 text-slate-400'
+                   }`}>
+                     <Send size={12} />
+                     <span>{campaign.channels.length} format{campaign.channels.length !== 1 ? 's' : ''}</span>
+                     {campaign.channels.length > 0 && <Check size={12} />}
+                   </div>
+                 </div>
+               </div>
+             </div>
+           ) : (
+             <CanvasBoard
+                items={campaignContent}
+                onItemsChange={handleCanvasUpdate}
+                onEdit={(id) => setEditingContentId(id)}
+                onDoubleClick={(id) => setDetailContentId(id)}
+                brandName={brandName}
+                focusTarget={canvasFocusTarget}
+             />
+           )}
         </div>
       </div>
 

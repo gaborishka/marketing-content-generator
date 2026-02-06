@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { HashRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { Layout } from './components/Layout';
 import { Dashboard } from './components/Dashboard';
@@ -7,9 +7,14 @@ import { ProductCatalog } from './components/ProductCatalog';
 import { CampaignList } from './components/CampaignList';
 import { ContentGenerator } from './components/ContentGenerator';
 import { CampaignDetail } from './components/CampaignDetail';
-import { Product, Campaign, GeneratedContent } from './types';
-import { Sparkles, KeyRound, ExternalLink, Loader2 } from 'lucide-react';
+import { ComplianceRules } from './components/ComplianceRules';
+import { Product, Campaign, GeneratedContent, ComplianceRule } from './types';
+import { Loader2 } from 'lucide-react';
 import * as storage from './services/storageService';
+import { uploadContentImages, isBase64DataUrl } from './services/fileStorage';
+import { AuthScreen } from './components/AuthScreen';
+import { onAuthChange, logOut } from './services/authService';
+import type { User } from 'firebase/auth';
 
 // Seed Data
 const MOCK_PRODUCTS: Product[] = [
@@ -143,19 +148,34 @@ function App() {
   const [products, setProducts] = useState<Product[]>([]);
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [contentStore, setContentStore] = useState<GeneratedContent[]>([]);
+  const [complianceRules, setComplianceRules] = useState<ComplianceRule[]>([]);
   
-  const [hasApiKey, setHasApiKey] = useState(false);
-  const [checkingKey, setCheckingKey] = useState(true);
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [authLoading, setAuthLoading] = useState(true);
   const [isLoadingData, setIsLoadingData] = useState(true);
 
-  // Load Data from IndexedDB on Mount
+  // Listen for auth state changes
   useEffect(() => {
+    const unsubscribe = onAuthChange((user) => {
+      setCurrentUser(user);
+      setAuthLoading(false);
+    });
+    return unsubscribe;
+  }, []);
+
+  // Load Data from Firestore on Mount (only when authenticated)
+  useEffect(() => {
+    if (!currentUser) {
+      setIsLoadingData(false);
+      return;
+    }
     const loadData = async () => {
       try {
-        const [dbProducts, dbCampaigns, dbContent] = await Promise.all([
+        const [dbProducts, dbCampaigns, dbContent, dbComplianceRules] = await Promise.all([
           storage.getAll<Product>('products'),
           storage.getAll<Campaign>('campaigns'),
-          storage.getAll<GeneratedContent>('content')
+          storage.getAll<GeneratedContent>('content'),
+          storage.getAll<ComplianceRule>('complianceRules')
         ]);
 
         if (dbProducts.length === 0) {
@@ -173,6 +193,8 @@ function App() {
           setCampaigns(dbCampaigns);
         }
 
+        setComplianceRules(dbComplianceRules);
+
         if (dbContent.length === 0) {
           await Promise.all(INITIAL_CONTENT.map(c => storage.put('content', c)));
           setContentStore(INITIAL_CONTENT);
@@ -185,90 +207,133 @@ function App() {
         setProducts(MOCK_PRODUCTS);
         setCampaigns(MOCK_CAMPAIGNS);
         setContentStore(INITIAL_CONTENT);
+        setComplianceRules([]);
       } finally {
         setIsLoadingData(false);
       }
     };
     loadData();
-  }, []);
+  }, [currentUser]);
 
-  // Check for API Key on mount
-  useEffect(() => {
-    const checkKey = async () => {
-      try {
-        if (process.env.API_KEY || process.env.GEMINI_API_KEY) {
-          setHasApiKey(true);
-        } else if ((window as any).aistudio && await (window as any).aistudio.hasSelectedApiKey()) {
-          setHasApiKey(true);
-        }
-      } catch (e) {
-        console.error("Error checking API key:", e);
-      } finally {
-        setCheckingKey(false);
-      }
-    };
-    checkKey();
-  }, []);
-
-  const handleConnectKey = async () => {
-    if ((window as any).aistudio) {
-      try {
-        await (window as any).aistudio.openSelectKey();
-        setHasApiKey(true);
-      } catch (e) {
-        console.error("Key selection failed", e);
-        if (e instanceof Error && e.message.includes("Requested entity was not found")) {
-          setHasApiKey(false);
-          alert("Key selection failed. Please try again.");
-        }
-      }
-    } else {
-      alert("AI Studio environment not detected.");
-    }
+  const handleComplianceRuleCreate = (rule: ComplianceRule) => {
+    setComplianceRules(prev => [rule, ...prev]);
+    storage.put('complianceRules', rule);
   };
 
-  const handleCampaignCreated = (newCampaign: Campaign, generatedContent: GeneratedContent[]) => {
-    // Update State
-    setCampaigns(prev => [newCampaign, ...prev]);
-    
-    const positionedContent = generatedContent.map((c, i) => ({
-      ...c,
-      x: 50 + (i % 3) * 350,
-      y: 50 + Math.floor(i / 3) * 400,
-      width: 320
+  const handleComplianceRuleUpdate = (rule: ComplianceRule) => {
+    setComplianceRules(prev => prev.map(r => r.id === rule.id ? rule : r));
+    storage.put('complianceRules', rule);
+  };
+
+  const handleComplianceRuleDelete = (ruleId: string) => {
+    setComplianceRules(prev => prev.filter(r => r.id !== ruleId));
+    storage.deleteItem('complianceRules', ruleId);
+    // Clear complianceRuleId from any campaigns referencing the deleted rule
+    setCampaigns(prev => prev.map(c => {
+      if (c.complianceRuleId === ruleId) {
+        const updated = { ...c, complianceRuleId: undefined };
+        storage.put('campaigns', updated);
+        return updated;
+      }
+      return c;
     }));
-    setContentStore(prev => [...positionedContent, ...prev]);
-
-    // Update DB
-    storage.put('campaigns', newCampaign);
-    positionedContent.forEach(c => storage.put('content', c));
   };
 
-  const handleCampaignUpdate = (updatedCampaign: Campaign) => {
+  const handleCampaignCreated = (newCampaign: Campaign) => {
+    setCampaigns(prev => [newCampaign, ...prev]);
+    storage.put('campaigns', newCampaign);
+  };
+
+  const handleCampaignUpdate = useCallback((updatedCampaign: Campaign) => {
     setCampaigns(prev => prev.map(c => c.id === updatedCampaign.id ? updatedCampaign : c));
     storage.put('campaigns', updatedCampaign);
-  };
+  }, []);
 
   const handleContentStoreUpdate = (newContentList: GeneratedContent[]) => {
-    setContentStore(newContentList);
-    // Persist all items in the list to ensuring sync
-    newContentList.forEach(c => storage.put('content', c));
+    // Capture the merged list so persistence/uploads use merged data (not stale input)
+    let mergedList: GeneratedContent[] = [];
+
+    setContentStore(prev => {
+      const prevMap = new Map(prev.map(c => [c.id, c]));
+      mergedList = newContentList.map(item => {
+        const existing = prevMap.get(item.id);
+        if (existing) {
+          return {
+            ...item,
+            imageUrl: item.imageUrl || existing.imageUrl,
+            storyboard: item.storyboard?.map((s, i) => ({
+              ...s,
+              imageUrl: s.imageUrl || existing.storyboard?.[i]?.imageUrl || '',
+            })) || existing.storyboard,
+          };
+        }
+        return item;
+      });
+      return mergedList;
+    });
+
+    // Use merged data for uploads & persistence (updater runs synchronously)
+    for (const item of mergedList) {
+      const hasBase64 = (item.imageUrl && isBase64DataUrl(item.imageUrl)) ||
+        item.storyboard?.some(s => s.imageUrl && isBase64DataUrl(s.imageUrl));
+
+      if (hasBase64) {
+        uploadContentImages(item)
+          .then(processed => {
+            storage.put('content', processed);
+            // Only update image fields to avoid overwriting concurrent changes
+            setContentStore(prev => prev.map(c => c.id === processed.id ? {
+              ...c,
+              imageUrl: processed.imageUrl || c.imageUrl,
+              storyboard: processed.storyboard || c.storyboard,
+            } : c));
+          })
+          .catch(() => storage.put('content', item));
+      } else {
+        storage.debouncedPut('content', item);
+      }
+    }
   };
 
   // Safe handler for single item update to avoid race conditions with closures
   const handleUpdateItem = (updatedItem: GeneratedContent) => {
+    // Immediate: update React state with base64 so user sees image instantly
     setContentStore(prev => {
-      // Find if item exists, if not just return prev to be safe (or append if needed)
-      const exists = prev.some(c => c.id === updatedItem.id);
-      if (exists) {
-        return prev.map(c => c.id === updatedItem.id ? updatedItem : c);
+      const existing = prev.find(c => c.id === updatedItem.id);
+      if (existing) {
+        // Merge: take image/storyboard/video from the update, preserve position and other fields
+        return prev.map(c => c.id === updatedItem.id ? {
+          ...existing,
+          imageUrl: updatedItem.imageUrl || existing.imageUrl,
+          storyboard: updatedItem.storyboard || existing.storyboard,
+          videoUrl: updatedItem.videoUrl || existing.videoUrl,
+          videoStatus: updatedItem.videoStatus || existing.videoStatus,
+        } : c);
       }
       return [...prev, updatedItem];
     });
-    storage.put('content', updatedItem);
+
+    // Background: upload base64 to Storage, then persist with download URLs
+    const hasBase64 = (updatedItem.imageUrl && isBase64DataUrl(updatedItem.imageUrl)) ||
+      updatedItem.storyboard?.some(s => s.imageUrl && isBase64DataUrl(s.imageUrl));
+
+    if (hasBase64) {
+      uploadContentImages(updatedItem)
+        .then(processed => {
+          storage.put('content', processed);
+          setContentStore(prev => prev.map(c => c.id === processed.id ? {
+            ...c,
+            imageUrl: processed.imageUrl || c.imageUrl,
+            storyboard: processed.storyboard || c.storyboard,
+          } : c));
+        })
+        .catch(() => storage.put('content', updatedItem));
+    } else {
+      storage.debouncedPut('content', updatedItem);
+    }
   };
 
-  if (checkingKey || isLoadingData) {
+  if (authLoading || isLoadingData) {
     return (
       <div className="h-screen flex flex-col items-center justify-center bg-slate-50 text-slate-400">
         <Loader2 className="animate-spin mb-2" size={32} />
@@ -277,69 +342,33 @@ function App() {
     );
   }
 
-  // Key Selection Screen
-  if (!hasApiKey) {
-    return (
-      <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-4">
-        <div className="max-w-md w-full bg-white rounded-2xl shadow-xl border border-slate-200 p-8 text-center">
-          <div className="mx-auto w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center mb-6 text-blue-600">
-            <Sparkles size={32} />
-          </div>
-          
-          <h1 className="text-2xl font-bold text-slate-900 mb-2">Welcome to MarketGen AI</h1>
-          <p className="text-slate-500 mb-8">
-            To generate high-quality marketing assets and images using the latest Gemini Pro models, please connect your Google AI Studio account.
-          </p>
-
-          <button 
-            onClick={handleConnectKey}
-            className="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 px-6 rounded-xl flex items-center justify-center space-x-2 transition-all transform hover:scale-[1.02] shadow-lg shadow-blue-500/20 mb-6"
-          >
-            <KeyRound size={20} />
-            <span>Connect API Key</span>
-          </button>
-
-          <div className="pt-6 border-t border-slate-100">
-             <a 
-               href="https://ai.google.dev/gemini-api/docs/billing" 
-               target="_blank" 
-               rel="noreferrer"
-               className="inline-flex items-center text-sm text-slate-500 hover:text-blue-600 transition-colors"
-             >
-               <span>View Billing Documentation</span>
-               <ExternalLink size={14} className="ml-1" />
-             </a>
-             <p className="text-xs text-slate-400 mt-2">
-               A paid project is required for the full enterprise experience.
-             </p>
-          </div>
-        </div>
-      </div>
-    );
+  if (!currentUser) {
+    return <AuthScreen />;
   }
 
   return (
     <Router>
-      <Layout>
+      <Layout onSignOut={logOut} userName={currentUser.displayName || currentUser.email || 'User'}>
         <Routes>
           <Route path="/" element={<Dashboard />} />
           <Route path="/campaigns" element={<CampaignList campaigns={campaigns} />} />
           <Route 
             path="/campaigns/new" 
             element={
-              <ContentGenerator 
-                products={products} 
-                onComplete={handleCampaignCreated} 
-                onUpdateItem={handleUpdateItem}
+              <ContentGenerator
+                products={products}
+                complianceRules={complianceRules}
+                onComplete={handleCampaignCreated}
               />
             } 
           />
           <Route 
             path="/campaigns/:id" 
             element={
-              <CampaignDetail 
+              <CampaignDetail
                 campaigns={campaigns}
                 products={products}
+                complianceRules={complianceRules}
                 contentStore={contentStore}
                 onUpdateContent={handleContentStoreUpdate}
                 onUpdateCampaign={handleCampaignUpdate}
@@ -348,6 +377,17 @@ function App() {
             } 
           />
           <Route path="/products" element={<ProductCatalog products={products} />} />
+          <Route
+            path="/compliance-rules"
+            element={
+              <ComplianceRules
+                rules={complianceRules}
+                onCreate={handleComplianceRuleCreate}
+                onUpdate={handleComplianceRuleUpdate}
+                onDelete={handleComplianceRuleDelete}
+              />
+            }
+          />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </Layout>

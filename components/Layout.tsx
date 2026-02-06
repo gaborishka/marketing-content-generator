@@ -2,8 +2,9 @@ import React, { useState } from 'react';
 import { 
   LayoutDashboard, 
   Megaphone, 
-  Package, 
-  Settings, 
+  Package,
+  ShieldCheck,
+  Settings,
   Menu, 
   Bell, 
   User, 
@@ -14,6 +15,8 @@ import { Link, useLocation } from 'react-router-dom';
 
 interface LayoutProps {
   children: React.ReactNode;
+  onSignOut?: () => void;
+  userName?: string;
 }
 
 const SidebarItem = ({ icon: Icon, label, path, active }: { icon: any, label: string, path: string, active: boolean }) => (
@@ -30,7 +33,7 @@ const SidebarItem = ({ icon: Icon, label, path, active }: { icon: any, label: st
   </Link>
 );
 
-export const Layout: React.FC<LayoutProps> = ({ children }) => {
+export const Layout: React.FC<LayoutProps> = ({ children, onSignOut, userName }) => {
   const location = useLocation();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const isCanvasRoute = /^\/campaigns\/[^/]+$/.test(location.pathname) && location.pathname !== '/campaigns/new';
@@ -63,14 +66,20 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
             path="/campaigns" 
             active={location.pathname.startsWith('/campaigns')} 
           />
-          <SidebarItem 
-            icon={Package} 
-            label="Products" 
-            path="/products" 
-            active={location.pathname.startsWith('/products')} 
+          <SidebarItem
+            icon={Package}
+            label="Products"
+            path="/products"
+            active={location.pathname.startsWith('/products')}
           />
-          <SidebarItem 
-            icon={Settings} 
+          <SidebarItem
+            icon={ShieldCheck}
+            label="Compliance Rules"
+            path="/compliance-rules"
+            active={location.pathname.startsWith('/compliance-rules')}
+          />
+          <SidebarItem
+            icon={Settings}
             label="Settings" 
             path="/settings" 
             active={location.pathname === '/settings'} 
@@ -80,13 +89,15 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
         <div className="absolute bottom-0 left-0 right-0 p-4 bg-slate-900 border-t border-slate-800">
           <div className="flex items-center space-x-3 p-2 rounded-lg hover:bg-slate-800 cursor-pointer transition-colors">
             <div className="w-8 h-8 rounded-full bg-gradient-to-r from-emerald-400 to-cyan-500 flex items-center justify-center text-xs font-bold text-slate-900">
-              JD
+              {(userName || 'U').charAt(0).toUpperCase()}
             </div>
             <div className="flex-1">
-              <p className="text-sm font-medium">John Doe</p>
+              <p className="text-sm font-medium">{userName || 'User'}</p>
               <p className="text-xs text-slate-400">Marketer Admin</p>
             </div>
-            <LogOut size={16} className="text-slate-400" />
+            <button onClick={onSignOut} title="Sign out">
+              <LogOut size={16} className="text-slate-400 hover:text-white transition-colors" />
+            </button>
           </div>
         </div>
       </aside>

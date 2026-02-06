@@ -17,6 +17,17 @@ export interface Product {
   marketingTags: string[];
 }
 
+// Compliance Rules
+export interface ComplianceRule {
+  id: string;
+  name: string;
+  description: string;
+  ruleText: string;
+  sourceFileName?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 // Campaigns
 export type CampaignStatus = 'draft' | 'generating' | 'review' | 'approved' | 'published' | 'paused' | 'completed';
 
@@ -42,6 +53,7 @@ export interface Campaign {
   budget: number;
   progress: number;
   complianceScore?: number;
+  complianceRuleId?: string;
 }
 
 // Video Storyboard Types
@@ -86,4 +98,29 @@ export interface DashboardMetrics {
 export interface ChartData {
   name: string;
   value: number;
+}
+
+export const CHANNEL_FORMATS: Record<string, string[]> = {
+  'Email': ['Email Newsletter'],
+  'LinkedIn': ['LinkedIn Post', 'LinkedIn Article'],
+  'Twitter': ['Tweet', 'Twitter Thread'],
+  'Instagram': ['Instagram Post', 'Instagram Reel', 'Instagram Story', 'Instagram Carousel'],
+  'Web': ['Web Banner', 'Blog Post'],
+  'TikTok': ['TikTok Video'],
+  'Facebook': ['Facebook Post', 'Facebook Ad'],
+  'YouTube': ['YouTube Video', 'YouTube Short'],
+  'Pinterest': ['Pinterest Pin'],
+  'Video Storyboard': ['Video Storyboard'],
+};
+
+// Pre-computed reverse lookup: sub-format name → parent channel name
+const SUB_FORMAT_TO_PARENT: Record<string, string> = {};
+for (const [parent, formats] of Object.entries(CHANNEL_FORMATS)) {
+  for (const fmt of formats) {
+    SUB_FORMAT_TO_PARENT[fmt] = parent;
+  }
+}
+
+export function getParentChannel(subFormat: string): string {
+  return SUB_FORMAT_TO_PARENT[subFormat] ?? subFormat;
 }

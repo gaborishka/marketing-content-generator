@@ -30,8 +30,10 @@ export const VideoStoryboardModal: React.FC<VideoStoryboardModalProps> = ({
   const [isGeneratingVideo, setIsGeneratingVideo] = useState(false);
   const [activeTab, setActiveTab] = useState<'video' | 'slideshow'>('video');
 
-  // Check if scenes have valid generated images (not mock URLs or empty)
-  const hasValidImages = content.storyboard?.every(s => s.imageUrl && s.imageUrl.startsWith('data:'));
+  // Check if scenes have valid generated images (base64 or Firebase Storage URLs, not mock URLs)
+  const isRealImage = (url?: string) =>
+    !!url && (url.startsWith('data:') || url.includes('firebasestorage.googleapis.com'));
+  const hasValidImages = content.storyboard?.every(s => isRealImage(s.imageUrl));
   const hasImages = content.storyboard?.some(s => !!s.imageUrl);
 
   const handleGenerateVideo = async () => {
@@ -47,7 +49,7 @@ export const VideoStoryboardModal: React.FC<VideoStoryboardModalProps> = ({
     onUpdate({ ...content, videoStatus: 'generating' });
 
     try {
-      const videoUrl = await generateVideoFromStoryboard(content.storyboard);
+      const videoUrl = await generateVideoFromStoryboard(content.storyboard, content.id);
       onUpdate({ 
         ...content, 
         videoUrl, 

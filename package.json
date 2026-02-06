@@ -4,22 +4,36 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
+    "dev": "concurrently --names emu,vite --prefix-colors blue,green \"npm run emulators\" \"VITE_USE_EMULATORS=true vite\"",
+    "dev:vite": "vite",
+    "emulators": "cd functions && npm run build && cd .. && npx firebase emulators:start --only functions",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "setup": "./scripts/setup-firebase.sh",
+    "deploy": "./scripts/setup-firebase.sh deploy",
+    "deploy:functions": "./scripts/setup-firebase.sh functions",
+    "deploy:rules": "./scripts/setup-firebase.sh rules",
+    "deploy:cors": "./scripts/setup-firebase.sh cors",
+    "deploy:secret": "./scripts/setup-firebase.sh secret"
   },
   "dependencies": {
-    "react-router-dom": "^7.13.0",
-    "react-dom": "^19.2.4",
     "@google/genai": "^1.39.0",
+    "firebase": "^12.9.0",
+    "lucide-react": "^0.563.0",
     "react": "^19.2.4",
-    "recharts": "^3.7.0",
-    "lucide-react": "^0.563.0"
+    "react-dom": "^19.2.4",
+    "react-router-dom": "^7.13.0",
+    "recharts": "^3.7.0"
   },
   "devDependencies": {
     "@types/node": "^22.14.0",
     "@vitejs/plugin-react": "^5.0.0",
+    "concurrently": "^9.2.1",
+    "firebase-tools": "^15.5.1",
     "typescript": "~5.8.2",
-    "vite": "^6.2.0"
+    "vite": "^6.2.0",
+    "vitest": "^4.0.18"
   }
 }

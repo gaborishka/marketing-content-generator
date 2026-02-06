@@ -1,30 +1,34 @@
-const DB_NAME = 'MarketGenDB';
-const DB_VERSION = 1;
+import { collection, doc, deleteDoc, getDocs, setDoc, writeBatch, query, where } from 'firebase/firestore';
+import { db } from './firebase';
+import { getCurrentUser } from './authService';
 
-const openDB = (): Promise<IDBDatabase> => {
-  return new Promise((resolve, reject) => {
-    const request = indexedDB.open(DB_NAME, DB_VERSION);
-    request.onerror = () => reject(request.error);
-    request.onsuccess = () => resolve(request.result);
-    request.onupgradeneeded = (event) => {
-      const db = (event.target as IDBOpenDBRequest).result;
-      if (!db.objectStoreNames.contains('products')) db.createObjectStore('products', { keyPath: 'id' });
-      if (!db.objectStoreNames.contains('campaigns')) db.createObjectStore('campaigns', { keyPath: 'id' });
-      if (!db.objectStoreNames.contains('content')) db.createObjectStore('content', { keyPath: 'id' });
-    };
-  });
+const getUserId = (): string => {
+  const user = getCurrentUser();
+  if (!user) throw new Error('Not authenticated');
+  return user.uid;
+};
+
+// Debounced writes: coalesce rapid put() calls per storeName/id into a single Firestore write
+const pendingWrites = new Map<string, ReturnType<typeof setTimeout>>();
+const DEBOUNCE_MS = 1000;
+
+export const debouncedPut = (storeName: string, item: any): void => {
+  const key = `${storeName}:${item.id}`;
+  const existing = pendingWrites.get(key);
+  if (existing) clearTimeout(existing);
+
+  pendingWrites.set(key, setTimeout(() => {
+    pendingWrites.delete(key);
+    put(storeName, item).catch(e => console.error(`Debounced write failed for ${key}`, e));
+  }, DEBOUNCE_MS));
 };
 
 export const getAll = async <T>(storeName: string): Promise<T[]> => {
   try {
-    const db = await openDB();
-    return new Promise((resolve, reject) => {
-      const transaction = db.transaction(storeName, 'readonly');
-      const store = transaction.objectStore(storeName);
-      const request = store.getAll();
-      request.onsuccess = () => resolve(request.result || []);
-      request.onerror = () => reject(request.error);
-    });
+    const userId = getUserId();
+    const q = query(collection(db, storeName), where('userId', '==', userId));
+    const snapshot = await getDocs(q);
+    return snapshot.docs.map((d) => d.data() as T);
   } catch (e) {
     console.error(`Error getting all from ${storeName}`, e);
     return [];
@@ -33,27 +37,29 @@ export const getAll = async <T>(storeName: string): Promise<T[]> => {
 
 export const put = async (storeName: string, item: any): Promise<void> => {
   try {
-    const db = await openDB();
-    return new Promise((resolve, reject) => {
-      const transaction = db.transaction(storeName, 'readwrite');
-      const store = transaction.objectStore(storeName);
-      const request = store.put(item);
-      request.onsuccess = () => resolve();
-      request.onerror = () => reject(request.error);
-    });
+    const userId = getUserId();
+    const sanitized = JSON.parse(JSON.stringify({ ...item, userId }));
+    await setDoc(doc(db, storeName, item.id), sanitized);
   } catch (e) {
     console.error(`Error putting to ${storeName}`, e);
     throw e;
   }
 };
 
+export const deleteItem = async (storeName: string, id: string): Promise<void> => {
+  try {
+    await deleteDoc(doc(db, storeName, id));
+  } catch (e) {
+    console.error(`Error deleting from ${storeName}`, e);
+    throw e;
+  }
+};
+
 export const clear = async (storeName: string): Promise<void> => {
-  const db = await openDB();
-  return new Promise((resolve, reject) => {
-    const transaction = db.transaction(storeName, 'readwrite');
-    const store = transaction.objectStore(storeName);
-    const request = store.clear();
-    request.onsuccess = () => resolve();
-    request.onerror = () => reject(request.error);
-  });
+  const userId = getUserId();
+  const q = query(collection(db, storeName), where('userId', '==', userId));
+  const snapshot = await getDocs(q);
+  const batch = writeBatch(db);
+  snapshot.docs.forEach((d) => batch.delete(d.ref));
+  await batch.commit();
 };

@@ -1,47 +1,33 @@
 
-import { GoogleGenAI, Type } from "@google/genai";
-import { Product, Campaign, GeneratedContent, Scene } from "../types";
+import { httpsCallable } from 'firebase/functions';
+import { Type } from '@google/genai';
+import { functions } from './firebase';
+import { Product, Campaign, GeneratedContent, Scene, ComplianceRule } from "../types";
 
-const MARKETING_MODEL = "gemini-3-flash-preview";
-const IMAGE_MODEL = "gemini-3-pro-image-preview";
-const VIDEO_MODEL = "veo-3.1-generate-preview";
+const generateContentFn = httpsCallable<any, { text: string }>(functions, 'generateContent');
+const generateImageFn = httpsCallable<any, { mimeType: string; data: string }>(functions, 'generateImage');
+const generateVideoFn = httpsCallable<any, { videoUrl: string }>(functions, 'generateVideo');
 
-// Helper to get client with current key
-const getAiClient = () => {
-  const apiKey = process.env.API_KEY || '';
-  return new GoogleGenAI({ apiKey });
-}
-
-// Helper to convert base64 to video reference object
-const createReferenceImage = (base64Data: string) => {
-  if (!base64Data.startsWith('data:')) {
-    throw new Error("Invalid image format. Real generated images are required for video creation.");
+// Build a reference image entry for the Cloud Function.
+// Base64 data URLs are parsed client-side; plain URLs are passed through
+// for the Cloud Function to fetch server-side (avoids server→client→server round-trip).
+const createReferenceImage = (imageData: string) => {
+  if (imageData.startsWith('data:')) {
+    const mimeMatch = imageData.match(/^data:(image\/\w+);base64,/);
+    const mimeType = mimeMatch ? mimeMatch[1] : 'image/png';
+    const data = imageData.replace(/^data:image\/\w+;base64,/, "");
+    return {
+      image: { imageBytes: data, mimeType },
+      referenceType: 'ASSET' as const,
+    };
   }
-
-  // Extract real mime type from data URL
-  const mimeMatch = base64Data.match(/^data:(image\/\w+);base64,/);
-  const mimeType = mimeMatch ? mimeMatch[1] : 'image/png';
-
-  // Strip prefix
-  const data = base64Data.replace(/^data:image\/\w+;base64,/, "");
-  
-  return {
-    image: {
-      imageBytes: data,
-      mimeType: mimeType,
-    },
-    referenceType: 'ASSET' as const
-  };
+  // URL — let the Cloud Function resolve it
+  return { imageUrl: imageData, referenceType: 'ASSET' as const };
 };
 
 export const generateImage = async (product: Product | undefined, contextText: string): Promise<string> => {
-  const apiKey = process.env.API_KEY;
-  if (!apiKey) return `https://picsum.photos/seed/${Date.now()}/800/400`;
-
-  const ai = getAiClient();
-
   let prompt = '';
-  
+
   if (product) {
     prompt = `
       Create a high-quality, photorealistic product marketing image.
@@ -62,86 +48,33 @@ export const generateImage = async (product: Product | undefined, contextText: s
   }
 
   try {
-    const response = await ai.models.generateContent({
-      model: IMAGE_MODEL,
-      contents: { parts: [{ text: prompt }] },
-      config: {
-        imageConfig: {
-          aspectRatio: "16:9",
-          imageSize: "1K"
-        }
-      }
-    });
-
-    for (const part of response.candidates?.[0]?.content?.parts || []) {
-      if (part.inlineData) {
-        return `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`;
-      }
-    }
-    return `https://picsum.photos/seed/${Math.floor(Math.random() * 1000)}/800/400`;
+    const result = await generateImageFn({ prompt });
+    const { mimeType, data } = result.data;
+    return `data:${mimeType};base64,${data}`;
   } catch (error) {
     console.error("Image Generation Error:", error);
     return `https://picsum.photos/seed/${Math.floor(Math.random() * 1000)}/800/400`;
   }
 };
 
-export const generateVideoFromStoryboard = async (storyboard: Scene[]): Promise<string> => {
-  const apiKey = process.env.API_KEY;
-  if (!apiKey) throw new Error("API Key required for video generation");
-
-  const ai = getAiClient();
+export const generateVideoFromStoryboard = async (storyboard: Scene[], contentId: string): Promise<string> => {
   const validScenes = storyboard.filter(s => s.imageUrl);
-  
+
   if (validScenes.length === 0) {
     throw new Error("No images available in storyboard to generate video.");
   }
 
-  // Prepare reference images (Up to 3)
-  // Ensure we only use valid base64 images
-  let referenceImages;
-  try {
-    referenceImages = validScenes.slice(0, 3).map(s => createReferenceImage(s.imageUrl!));
-  } catch (e: any) {
-    throw new Error(e.message || "Failed to process storyboard images. Ensure they are fully generated.");
-  }
+  // Prepare reference images (up to 3). URLs are resolved server-side.
+  const referenceImages = validScenes.slice(0, 3).map(s => createReferenceImage(s.imageUrl!));
 
   try {
-    let operation = await ai.models.generateVideos({
-      model: VIDEO_MODEL,
+    const result = await generateVideoFn({
+      referenceImages,
+      contentId,
       prompt: "A cinematic commercial video. Smooth transitions between scenes. High quality, 4k.",
-      config: {
-        numberOfVideos: 1,
-        referenceImages: referenceImages as any, // Cast to any to avoid strict type issues
-        resolution: '720p',
-        aspectRatio: '16:9'
-      }
     });
 
-    // Poll for completion
-    while (!operation.done) {
-      await new Promise(resolve => setTimeout(resolve, 5000)); // Poll every 5s
-      operation = await ai.operations.getVideosOperation({ operation: operation });
-    }
-
-    if (operation.error) {
-      console.error("Video Generation Operation Error:", operation.error);
-      throw new Error(`Video generation failed: ${operation.error.message || 'Unknown error'}`);
-    }
-
-    const downloadLink = operation.response?.generatedVideos?.[0]?.video?.uri;
-    if (!downloadLink) {
-      console.error("Operation completed but no video URI found.", JSON.stringify(operation, null, 2));
-      throw new Error("No video URI returned. Check console for operation details.");
-    }
-
-    // Fetch the actual video bytes using the API key
-    const videoRes = await fetch(`${downloadLink}&key=${apiKey}`);
-    if (!videoRes.ok) {
-       throw new Error(`Failed to download video: ${videoRes.statusText}`);
-    }
-    const videoBlob = await videoRes.blob();
-    return URL.createObjectURL(videoBlob);
-
+    return result.data.videoUrl;
   } catch (error) {
     console.error("Video Generation Error:", error);
     throw error;
@@ -151,12 +84,9 @@ export const generateVideoFromStoryboard = async (storyboard: Scene[]): Promise<
 export const generateMarketingContent = async (
   campaign: Campaign,
   allProducts: Product[],
+  complianceRule?: ComplianceRule,
   onImageUpdate?: (updatedContent: GeneratedContent) => void
 ): Promise<GeneratedContent[]> => {
-  const apiKey = process.env.API_KEY;
-  if (!apiKey) return mockGeneration(campaign, allProducts);
-
-  const ai = getAiClient();
 
   // Resolve Products
   const primaryProduct = allProducts.find(p => p.id === campaign.primaryProductId);
@@ -174,67 +104,85 @@ export const generateMarketingContent = async (
     productContext += `Secondary Products to mention: ${secondaryProducts.map(p => p.name).join(', ')}. \n`;
   }
 
+  let complianceBlock = '';
+  if (complianceRule) {
+    complianceBlock = `
+    COMPLIANCE RULES (MANDATORY):
+    Rule Name: ${complianceRule.name}
+    Rule Description: ${complianceRule.description}
+    Full Rule Text: ${complianceRule.ruleText}
+
+    You MUST evaluate all generated content against these compliance rules. Reflect adherence in the complianceScore field.
+    `;
+  }
+
+  // Build channel × audience combinations (channels are already sub-format names)
+  const combinations: { channel: string; audience: string }[] = [];
+  for (const channel of campaign.channels) {
+    for (const audience of campaign.targetAudiences) {
+      combinations.push({ channel, audience });
+    }
+  }
+  const cappedCombinations = combinations.slice(0, 6);
+
+  const combinationList = cappedCombinations.map((c, i) =>
+    `${i + 1}. Channel: "${c.channel}", Audience: "${c.audience}"`
+  ).join('\n    ');
+
   const prompt = `
     You are an expert marketing copywriter.
-    
+
     ${productContext}
-    
+    ${complianceBlock}
     Campaign Context: ${campaign.context}
     ${campaign.attachments.length > 0 ? `Attached Documents (Reference only): ${campaign.attachments.join(', ')}` : ''}
 
     Campaign Goal: ${campaign.description}
-    Target Audiences: ${campaign.targetAudiences.join(", ")}
-    Channels: ${campaign.channels.join(", ")}
     Key Message: ${campaign.keyMessage}
-    
-    Task: Generate marketing content variants.
-    Constraint: Generate a maximum of 6 high-quality distinct variants covering different audience/channel combinations to ensure valid JSON output.
-    
+
+    Task: Generate exactly ${cappedCombinations.length} marketing content items for these combinations:
+    ${combinationList}
+
+    IMPORTANT: The "channel" field in your output must EXACTLY match the channel names listed above.
+
     IMPORTANT for 'Video Storyboard' channel:
     - Instead of simple text, generate a 'storyboard' array with exactly 3 scenes.
     - Each scene must have: sceneNumber, imagePrompt (visual description), voiceover (script).
     - The top-level 'text' field should correspond to the full voiceover script.
-    
+
     Return JSON array.
   `;
 
-  try {
-    const response = await ai.models.generateContent({
-      model: MARKETING_MODEL,
-      contents: prompt,
-      config: {
-        responseMimeType: "application/json",
-        maxOutputTokens: 8192,
-        responseSchema: {
+  const responseSchema = {
+    type: Type.ARRAY,
+    items: {
+      type: Type.OBJECT,
+      properties: {
+        channel: { type: Type.STRING },
+        audience: { type: Type.STRING },
+        text: { type: Type.STRING },
+        complianceScore: { type: Type.NUMBER },
+        riskLevel: { type: Type.STRING, enum: ["low", "medium", "high"] },
+        storyboard: {
           type: Type.ARRAY,
           items: {
             type: Type.OBJECT,
             properties: {
-              channel: { type: Type.STRING },
-              audience: { type: Type.STRING },
-              text: { type: Type.STRING },
-              complianceScore: { type: Type.NUMBER },
-              riskLevel: { type: Type.STRING, enum: ["low", "medium", "high"] },
-              storyboard: {
-                type: Type.ARRAY,
-                items: {
-                  type: Type.OBJECT,
-                  properties: {
-                    sceneNumber: { type: Type.INTEGER },
-                    imagePrompt: { type: Type.STRING },
-                    voiceover: { type: Type.STRING }
-                  }
-                }
-              }
-            },
-            required: ["channel", "audience", "text", "complianceScore", "riskLevel"]
+              sceneNumber: { type: Type.INTEGER },
+              imagePrompt: { type: Type.STRING },
+              voiceover: { type: Type.STRING }
+            }
           }
         }
-      }
-    });
+      },
+      required: ["channel", "audience", "text", "complianceScore", "riskLevel"]
+    }
+  };
 
-    const cleanText = (response.text || "[]").replace(/```json\n?|```/g, '').trim();
-    
+  try {
+    const result = await generateContentFn({ prompt, responseSchema });
+    const cleanText = (result.data.text || "[]").replace(/```json\n?|```/g, '').trim();
+
     let rawData: any[] = [];
     try {
       rawData = JSON.parse(cleanText);
@@ -242,7 +190,7 @@ export const generateMarketingContent = async (
       console.error("JSON Parse Error on GenAI response:", parseError);
       return mockGeneration(campaign, allProducts);
     }
-    
+
     if (!Array.isArray(rawData)) {
       return mockGeneration(campaign, allProducts);
     }
@@ -252,7 +200,7 @@ export const generateMarketingContent = async (
       if (item.channel === 'Video Storyboard' && item.storyboard) {
         storyboard = item.storyboard.map((scene: any) => ({
           ...scene,
-          imageUrl: '' 
+          imageUrl: ''
         }));
       }
 
@@ -283,11 +231,11 @@ export const generateMarketingContent = async (
                 // Pass primary product if available, otherwise just use prompt text
                 const img = await generateImage(primaryProduct, scene.imagePrompt);
                 updatedStoryboard[idx] = { ...updatedStoryboard[idx], imageUrl: img };
-                
+
                 if (onImageUpdate) {
-                  onImageUpdate({ 
-                    ...contentItem, 
-                    storyboard: [...updatedStoryboard] 
+                  onImageUpdate({
+                    ...contentItem,
+                    storyboard: [...updatedStoryboard]
                   });
                 }
               } catch (e) {
@@ -318,9 +266,9 @@ export const generateMarketingContent = async (
 const mockGeneration = (campaign: Campaign, allProducts: Product[]): GeneratedContent[] => {
   const generated: GeneratedContent[] = [];
   let count = 0;
-  const maxItems = 5;
+  const maxItems = 6;
   const primary = allProducts.find(p => p.id === campaign.primaryProductId);
-  
+
   for (const channel of campaign.channels) {
     for (const audience of campaign.targetAudiences) {
       if (count >= maxItems) break;
