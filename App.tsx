@@ -7,9 +7,11 @@ import { ProductCatalog } from './components/ProductCatalog';
 import { CampaignList } from './components/CampaignList';
 import { ContentGenerator } from './components/ContentGenerator';
 import { CampaignDetail } from './components/CampaignDetail';
-import { Product, Campaign, GeneratedContent } from './types';
+import { ComplianceRules } from './components/ComplianceRules';
+import { Product, Campaign, GeneratedContent, ComplianceRule } from './types';
 import { Sparkles, KeyRound, ExternalLink, Loader2 } from 'lucide-react';
 import * as storage from './services/storageService';
+import { uploadContentImages, isBase64DataUrl } from './services/fileStorage';
 
 // Seed Data
 const MOCK_PRODUCTS: Product[] = [
@@ -143,6 +145,7 @@ function App() {
   const [products, setProducts] = useState<Product[]>([]);
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [contentStore, setContentStore] = useState<GeneratedContent[]>([]);
+  const [complianceRules, setComplianceRules] = useState<ComplianceRule[]>([]);
   
   const [hasApiKey, setHasApiKey] = useState(false);
   const [checkingKey, setCheckingKey] = useState(true);
@@ -152,10 +155,11 @@ function App() {
   useEffect(() => {
     const loadData = async () => {
       try {
-        const [dbProducts, dbCampaigns, dbContent] = await Promise.all([
+        const [dbProducts, dbCampaigns, dbContent, dbComplianceRules] = await Promise.all([
           storage.getAll<Product>('products'),
           storage.getAll<Campaign>('campaigns'),
-          storage.getAll<GeneratedContent>('content')
+          storage.getAll<GeneratedContent>('content'),
+          storage.getAll<ComplianceRule>('complianceRules')
         ]);
 
         if (dbProducts.length === 0) {
@@ -172,6 +176,8 @@ function App() {
         } else {
           setCampaigns(dbCampaigns);
         }
+
+        setComplianceRules(dbComplianceRules);
 
         if (dbContent.length === 0) {
           await Promise.all(INITIAL_CONTENT.map(c => storage.put('content', c)));
@@ -227,21 +233,33 @@ function App() {
     }
   };
 
-  const handleCampaignCreated = (newCampaign: Campaign, generatedContent: GeneratedContent[]) => {
-    // Update State
-    setCampaigns(prev => [newCampaign, ...prev]);
-    
-    const positionedContent = generatedContent.map((c, i) => ({
-      ...c,
-      x: 50 + (i % 3) * 350,
-      y: 50 + Math.floor(i / 3) * 400,
-      width: 320
-    }));
-    setContentStore(prev => [...positionedContent, ...prev]);
+  const handleComplianceRuleCreate = (rule: ComplianceRule) => {
+    setComplianceRules(prev => [rule, ...prev]);
+    storage.put('complianceRules', rule);
+  };
 
-    // Update DB
+  const handleComplianceRuleUpdate = (rule: ComplianceRule) => {
+    setComplianceRules(prev => prev.map(r => r.id === rule.id ? rule : r));
+    storage.put('complianceRules', rule);
+  };
+
+  const handleComplianceRuleDelete = (ruleId: string) => {
+    setComplianceRules(prev => prev.filter(r => r.id !== ruleId));
+    storage.deleteItem('complianceRules', ruleId);
+    // Clear complianceRuleId from any campaigns referencing the deleted rule
+    setCampaigns(prev => prev.map(c => {
+      if (c.complianceRuleId === ruleId) {
+        const updated = { ...c, complianceRuleId: undefined };
+        storage.put('campaigns', updated);
+        return updated;
+      }
+      return c;
+    }));
+  };
+
+  const handleCampaignCreated = (newCampaign: Campaign) => {
+    setCampaigns(prev => [newCampaign, ...prev]);
     storage.put('campaigns', newCampaign);
-    positionedContent.forEach(c => storage.put('content', c));
   };
 
   const handleCampaignUpdate = (updatedCampaign: Campaign) => {
@@ -251,21 +269,49 @@ function App() {
 
   const handleContentStoreUpdate = (newContentList: GeneratedContent[]) => {
     setContentStore(newContentList);
-    // Persist all items in the list to ensuring sync
-    newContentList.forEach(c => storage.put('content', c));
+    // Upload images to Storage, then persist with download URLs
+    newContentList.forEach(item => {
+      const hasBase64 = (item.imageUrl && isBase64DataUrl(item.imageUrl)) ||
+        item.storyboard?.some(s => s.imageUrl && isBase64DataUrl(s.imageUrl));
+
+      if (hasBase64) {
+        uploadContentImages(item)
+          .then(processed => {
+            storage.put('content', processed);
+            setContentStore(prev => prev.map(c => c.id === processed.id ? processed : c));
+          })
+          .catch(() => storage.put('content', item));
+      } else {
+        storage.put('content', item);
+      }
+    });
   };
 
   // Safe handler for single item update to avoid race conditions with closures
   const handleUpdateItem = (updatedItem: GeneratedContent) => {
+    // Immediate: update React state with base64 so user sees image instantly
     setContentStore(prev => {
-      // Find if item exists, if not just return prev to be safe (or append if needed)
       const exists = prev.some(c => c.id === updatedItem.id);
       if (exists) {
         return prev.map(c => c.id === updatedItem.id ? updatedItem : c);
       }
       return [...prev, updatedItem];
     });
-    storage.put('content', updatedItem);
+
+    // Background: upload base64 to Storage, then persist with download URLs
+    const hasBase64 = (updatedItem.imageUrl && isBase64DataUrl(updatedItem.imageUrl)) ||
+      updatedItem.storyboard?.some(s => s.imageUrl && isBase64DataUrl(s.imageUrl));
+
+    if (hasBase64) {
+      uploadContentImages(updatedItem)
+        .then(processed => {
+          storage.put('content', processed);
+          setContentStore(prev => prev.map(c => c.id === processed.id ? processed : c));
+        })
+        .catch(() => storage.put('content', updatedItem));
+    } else {
+      storage.put('content', updatedItem);
+    }
   };
 
   if (checkingKey || isLoadingData) {
@@ -327,19 +373,20 @@ function App() {
           <Route 
             path="/campaigns/new" 
             element={
-              <ContentGenerator 
-                products={products} 
-                onComplete={handleCampaignCreated} 
-                onUpdateItem={handleUpdateItem}
+              <ContentGenerator
+                products={products}
+                complianceRules={complianceRules}
+                onComplete={handleCampaignCreated}
               />
             } 
           />
           <Route 
             path="/campaigns/:id" 
             element={
-              <CampaignDetail 
+              <CampaignDetail
                 campaigns={campaigns}
                 products={products}
+                complianceRules={complianceRules}
                 contentStore={contentStore}
                 onUpdateContent={handleContentStoreUpdate}
                 onUpdateCampaign={handleCampaignUpdate}
@@ -348,6 +395,17 @@ function App() {
             } 
           />
           <Route path="/products" element={<ProductCatalog products={products} />} />
+          <Route
+            path="/compliance-rules"
+            element={
+              <ComplianceRules
+                rules={complianceRules}
+                onCreate={handleComplianceRuleCreate}
+                onUpdate={handleComplianceRuleUpdate}
+                onDelete={handleComplianceRuleDelete}
+              />
+            }
+          />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </Layout>

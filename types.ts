@@ -17,6 +17,17 @@ export interface Product {
   marketingTags: string[];
 }
 
+// Compliance Rules
+export interface ComplianceRule {
+  id: string;
+  name: string;
+  description: string;
+  ruleText: string;
+  sourceFileName?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 // Campaigns
 export type CampaignStatus = 'draft' | 'generating' | 'review' | 'approved' | 'published' | 'paused' | 'completed';
 
@@ -42,6 +53,7 @@ export interface Campaign {
   budget: number;
   progress: number;
   complianceScore?: number;
+  complianceRuleId?: string;
 }
 
 // Video Storyboard Types

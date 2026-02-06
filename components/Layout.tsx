@@ -2,8 +2,9 @@ import React, { useState } from 'react';
 import { 
   LayoutDashboard, 
   Megaphone, 
-  Package, 
-  Settings, 
+  Package,
+  ShieldCheck,
+  Settings,
   Menu, 
   Bell, 
   User, 
@@ -63,14 +64,20 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
             path="/campaigns" 
             active={location.pathname.startsWith('/campaigns')} 
           />
-          <SidebarItem 
-            icon={Package} 
-            label="Products" 
-            path="/products" 
-            active={location.pathname.startsWith('/products')} 
+          <SidebarItem
+            icon={Package}
+            label="Products"
+            path="/products"
+            active={location.pathname.startsWith('/products')}
           />
-          <SidebarItem 
-            icon={Settings} 
+          <SidebarItem
+            icon={ShieldCheck}
+            label="Compliance Rules"
+            path="/compliance-rules"
+            active={location.pathname.startsWith('/compliance-rules')}
+          />
+          <SidebarItem
+            icon={Settings}
             label="Settings" 
             path="/settings" 
             active={location.pathname === '/settings'} 

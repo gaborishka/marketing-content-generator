@@ -1,6 +1,6 @@
 
 import { GoogleGenAI, Type } from "@google/genai";
-import { Product, Campaign, GeneratedContent, Scene } from "../types";
+import { Product, Campaign, GeneratedContent, Scene, ComplianceRule } from "../types";
 
 const MARKETING_MODEL = "gemini-3-flash-preview";
 const IMAGE_MODEL = "gemini-3-pro-image-preview";
@@ -12,10 +12,20 @@ const getAiClient = () => {
   return new GoogleGenAI({ apiKey });
 }
 
-// Helper to convert base64 to video reference object
-const createReferenceImage = (base64Data: string) => {
-  if (!base64Data.startsWith('data:')) {
-    throw new Error("Invalid image format. Real generated images are required for video creation.");
+// Helper to convert image (base64 or URL) to video reference object
+const createReferenceImage = async (imageData: string) => {
+  let base64Data = imageData;
+
+  // If it's a URL (not base64), fetch and convert to base64
+  if (!imageData.startsWith('data:')) {
+    const response = await fetch(imageData);
+    const blob = await response.blob();
+    base64Data = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onloadend = () => resolve(reader.result as string);
+      reader.onerror = reject;
+      reader.readAsDataURL(blob);
+    });
   }
 
   // Extract real mime type from data URL
@@ -24,7 +34,7 @@ const createReferenceImage = (base64Data: string) => {
 
   // Strip prefix
   const data = base64Data.replace(/^data:image\/\w+;base64,/, "");
-  
+
   return {
     image: {
       imageBytes: data,
@@ -97,10 +107,12 @@ export const generateVideoFromStoryboard = async (storyboard: Scene[]): Promise<
   }
 
   // Prepare reference images (Up to 3)
-  // Ensure we only use valid base64 images
+  // Supports both base64 and Storage URLs
   let referenceImages;
   try {
-    referenceImages = validScenes.slice(0, 3).map(s => createReferenceImage(s.imageUrl!));
+    referenceImages = await Promise.all(
+      validScenes.slice(0, 3).map(s => createReferenceImage(s.imageUrl!))
+    );
   } catch (e: any) {
     throw new Error(e.message || "Failed to process storyboard images. Ensure they are fully generated.");
   }
@@ -151,6 +163,7 @@ export const generateVideoFromStoryboard = async (storyboard: Scene[]): Promise<
 export const generateMarketingContent = async (
   campaign: Campaign,
   allProducts: Product[],
+  complianceRule?: ComplianceRule,
   onImageUpdate?: (updatedContent: GeneratedContent) => void
 ): Promise<GeneratedContent[]> => {
   const apiKey = process.env.API_KEY;
@@ -174,11 +187,23 @@ export const generateMarketingContent = async (
     productContext += `Secondary Products to mention: ${secondaryProducts.map(p => p.name).join(', ')}. \n`;
   }
 
+  let complianceBlock = '';
+  if (complianceRule) {
+    complianceBlock = `
+    COMPLIANCE RULES (MANDATORY):
+    Rule Name: ${complianceRule.name}
+    Rule Description: ${complianceRule.description}
+    Full Rule Text: ${complianceRule.ruleText}
+
+    You MUST evaluate all generated content against these compliance rules. Reflect adherence in the complianceScore field.
+    `;
+  }
+
   const prompt = `
     You are an expert marketing copywriter.
-    
+
     ${productContext}
-    
+    ${complianceBlock}
     Campaign Context: ${campaign.context}
     ${campaign.attachments.length > 0 ? `Attached Documents (Reference only): ${campaign.attachments.join(', ')}` : ''}
 
