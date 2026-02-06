@@ -1,3 +1,4 @@
+
 import React from 'react';
 import { Plus, MoreVertical, Calendar, BarChart2 } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
@@ -45,6 +46,7 @@ export const CampaignList: React.FC<CampaignListProps> = ({ campaigns }) => {
             <thead>
               <tr className="bg-slate-50 border-b border-slate-200">
                 <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">Campaign Name</th>
+                <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">Type</th>
                 <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">Status</th>
                 <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">Channels</th>
                 <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">Progress</th>
@@ -69,6 +71,13 @@ export const CampaignList: React.FC<CampaignListProps> = ({ campaigns }) => {
                         <div className="text-xs text-slate-500">{campaign.keyMessage.substring(0, 30)}...</div>
                       </div>
                     </div>
+                  </td>
+                  <td className="px-6 py-4">
+                     {campaign.primaryProductId ? (
+                       <span className="text-xs font-medium text-blue-600 bg-blue-50 px-2 py-1 rounded">Product</span>
+                     ) : (
+                       <span className="text-xs font-medium text-purple-600 bg-purple-50 px-2 py-1 rounded">Brand/Idea</span>
+                     )}
                   </td>
                   <td className="px-6 py-4">
                     <StatusBadge status={campaign.status} />

@@ -1,3 +1,4 @@
+
 // User Roles
 export type UserRole = 'admin' | 'marketer' | 'reviewer';
 
@@ -24,7 +25,15 @@ export interface Campaign {
   name: string;
   description: string;
   status: CampaignStatus;
-  productId: string;
+  
+  // New Product Structure
+  primaryProductId?: string;
+  secondaryProductIds: string[];
+  
+  // New Context fields
+  context: string;
+  attachments: string[]; // List of filenames
+
   targetAudiences: string[];
   channels: string[];
   languages: string[];
@@ -35,11 +44,19 @@ export interface Campaign {
   complianceScore?: number;
 }
 
+// Video Storyboard Types
+export interface Scene {
+  sceneNumber: number;
+  imagePrompt: string;
+  voiceover: string;
+  imageUrl?: string;
+}
+
 // Content Generation
 export interface GeneratedContent {
   id: string;
   campaignId: string;
-  channel: string; // e.g., 'Twitter', 'LinkedIn', 'Email'
+  channel: string; // e.g., 'Twitter', 'LinkedIn', 'Email', 'Video Storyboard'
   audience: string;
   text: string;
   imageUrl?: string;
@@ -52,6 +69,10 @@ export interface GeneratedContent {
   width?: number;
   height?: number;
   connections?: string[]; // IDs of connected cards
+  // Video specific properties
+  storyboard?: Scene[];
+  videoUrl?: string;
+  videoStatus?: 'idle' | 'generating' | 'completed' | 'failed';
 }
 
 // Analytics

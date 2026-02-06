@@ -13,9 +13,10 @@ import { CanvasCard } from './CanvasCard';
 interface CanvasBoardProps {
   items: GeneratedContent[];
   onItemsChange: (items: GeneratedContent[]) => void;
+  onEdit?: (id: string) => void; // Added onEdit prop
 }
 
-export const CanvasBoard: React.FC<CanvasBoardProps> = ({ items, onItemsChange }) => {
+export const CanvasBoard: React.FC<CanvasBoardProps> = ({ items, onItemsChange, onEdit }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   
   // Viewport State
@@ -86,10 +87,6 @@ export const CanvasBoard: React.FC<CanvasBoardProps> = ({ items, onItemsChange }
       e.preventDefault();
       const zoomSensitivity = 0.001;
       const newScale = Math.min(Math.max(0.1, scale - e.deltaY * zoomSensitivity), 3);
-      
-      // Zoom towards pointer logic (simplified for now to center zoom or just scale)
-      // For true infinite canvas zoom-to-point, we need more complex matrix math.
-      // Keeping it simple: Zoom center for now.
       setScale(newScale);
     } else {
       // Pan with wheel
@@ -117,7 +114,7 @@ export const CanvasBoard: React.FC<CanvasBoardProps> = ({ items, onItemsChange }
     setIsDraggingCard(id);
   };
 
-  // Render Connections (Simple straight lines for "DNA")
+  // Render Connections
   const renderConnections = () => {
     return (
       <svg className="absolute top-0 left-0 w-full h-full pointer-events-none overflow-visible z-0">
@@ -149,6 +146,21 @@ export const CanvasBoard: React.FC<CanvasBoardProps> = ({ items, onItemsChange }
     );
   };
 
+  // Safe wrapper for onEdit
+  const handleEdit = (id: string) => {
+    if (onEdit) {
+      onEdit(id);
+    } else {
+      // Try to find the event from parent if passed via other means, or log warning
+      console.warn("Edit handler not connected");
+    }
+  };
+
+  // We need to inject the onEdit handler from props to the CampaignDetail usage
+  // The CampaignDetail component in the previous update didn't pass onEdit, I need to update it in CampaignDetail.tsx too.
+  // Wait, I updated CampaignDetail.tsx in the previous block but I commented about it. 
+  // I need to ensure CampaignDetail.tsx passes the prop.
+  
   return (
     <div className="relative w-full h-full overflow-hidden bg-slate-100 flex flex-col">
       {/* Toolbar */}
@@ -215,7 +227,7 @@ export const CanvasBoard: React.FC<CanvasBoardProps> = ({ items, onItemsChange }
               isSelected={selection.includes(item.id)}
               scale={scale}
               onMouseDown={handleCardMouseDown}
-              onEdit={() => {}}
+              onEdit={handleEdit}
               onDelete={() => {}}
             />
           ))}

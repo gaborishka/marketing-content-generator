@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { HashRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { Layout } from './components/Layout';
@@ -7,7 +8,8 @@ import { CampaignList } from './components/CampaignList';
 import { ContentGenerator } from './components/ContentGenerator';
 import { CampaignDetail } from './components/CampaignDetail';
 import { Product, Campaign, GeneratedContent } from './types';
-import { Sparkles, KeyRound, ExternalLink } from 'lucide-react';
+import { Sparkles, KeyRound, ExternalLink, Loader2 } from 'lucide-react';
+import * as storage from './services/storageService';
 
 // Seed Data
 const MOCK_PRODUCTS: Product[] = [
@@ -58,7 +60,10 @@ const MOCK_CAMPAIGNS: Campaign[] = [
     name: 'Back to School Respirol Campaign',
     description: 'Launch campaign for Respirol',
     status: 'published',
-    productId: 'prod-1',
+    primaryProductId: 'prod-1',
+    secondaryProductIds: [],
+    context: 'Focus on children returning to school and managing asthma during sports.',
+    attachments: ['guidelines_2024.pdf'],
     targetAudiences: ['Healthcare Professionals', 'Parents'],
     channels: ['LinkedIn', 'Instagram', 'Twitter'],
     languages: ['en'],
@@ -72,7 +77,10 @@ const MOCK_CAMPAIGNS: Campaign[] = [
     name: 'NeuroFocus Student Push',
     description: 'Student targeting for NeuroFocus',
     status: 'draft',
-    productId: 'prod-3',
+    primaryProductId: 'prod-3',
+    secondaryProductIds: ['prod-2'], // Cross sell
+    context: 'Exam season stress relief and focus enhancement.',
+    attachments: [],
     targetAudiences: ['Students'],
     channels: ['TikTok', 'Twitter'],
     languages: ['en'],
@@ -132,11 +140,57 @@ const INITIAL_CONTENT: GeneratedContent[] = [
 ];
 
 function App() {
-  const [products] = useState<Product[]>(MOCK_PRODUCTS);
-  const [campaigns, setCampaigns] = useState<Campaign[]>(MOCK_CAMPAIGNS);
-  const [contentStore, setContentStore] = useState<GeneratedContent[]>(INITIAL_CONTENT);
+  const [products, setProducts] = useState<Product[]>([]);
+  const [campaigns, setCampaigns] = useState<Campaign[]>([]);
+  const [contentStore, setContentStore] = useState<GeneratedContent[]>([]);
+  
   const [hasApiKey, setHasApiKey] = useState(false);
   const [checkingKey, setCheckingKey] = useState(true);
+  const [isLoadingData, setIsLoadingData] = useState(true);
+
+  // Load Data from IndexedDB on Mount
+  useEffect(() => {
+    const loadData = async () => {
+      try {
+        const [dbProducts, dbCampaigns, dbContent] = await Promise.all([
+          storage.getAll<Product>('products'),
+          storage.getAll<Campaign>('campaigns'),
+          storage.getAll<GeneratedContent>('content')
+        ]);
+
+        if (dbProducts.length === 0) {
+          // Seed DB with mock data if empty
+          await Promise.all(MOCK_PRODUCTS.map(p => storage.put('products', p)));
+          setProducts(MOCK_PRODUCTS);
+        } else {
+          setProducts(dbProducts);
+        }
+
+        if (dbCampaigns.length === 0) {
+          await Promise.all(MOCK_CAMPAIGNS.map(c => storage.put('campaigns', c)));
+          setCampaigns(MOCK_CAMPAIGNS);
+        } else {
+          setCampaigns(dbCampaigns);
+        }
+
+        if (dbContent.length === 0) {
+          await Promise.all(INITIAL_CONTENT.map(c => storage.put('content', c)));
+          setContentStore(INITIAL_CONTENT);
+        } else {
+          setContentStore(dbContent);
+        }
+      } catch (e) {
+        console.error("Failed to load data from storage", e);
+        // Fallback to mocks in memory if DB fails
+        setProducts(MOCK_PRODUCTS);
+        setCampaigns(MOCK_CAMPAIGNS);
+        setContentStore(INITIAL_CONTENT);
+      } finally {
+        setIsLoadingData(false);
+      }
+    };
+    loadData();
+  }, []);
 
   // Check for API Key on mount
   useEffect(() => {
@@ -158,12 +212,9 @@ function App() {
     if ((window as any).aistudio) {
       try {
         await (window as any).aistudio.openSelectKey();
-        // Assuming success if the dialog closes without throwing, 
-        // mitigating race condition by setting true immediately as per instructions
         setHasApiKey(true);
       } catch (e) {
         console.error("Key selection failed", e);
-        // If "Requested entity was not found", reset state
         if (e instanceof Error && e.message.includes("Requested entity was not found")) {
           setHasApiKey(false);
           alert("Key selection failed. Please try again.");
@@ -175,25 +226,53 @@ function App() {
   };
 
   const handleCampaignCreated = (newCampaign: Campaign, generatedContent: GeneratedContent[]) => {
-    setCampaigns([newCampaign, ...campaigns]);
+    // Update State
+    setCampaigns(prev => [newCampaign, ...prev]);
     
-    // Assign initial positions to generated content for the canvas
     const positionedContent = generatedContent.map((c, i) => ({
       ...c,
-      x: 50 + (i % 3) * 350, // Simple grid layout logic
+      x: 50 + (i % 3) * 350,
       y: 50 + Math.floor(i / 3) * 400,
       width: 320
     }));
+    setContentStore(prev => [...positionedContent, ...prev]);
 
-    setContentStore([...positionedContent, ...contentStore]);
+    // Update DB
+    storage.put('campaigns', newCampaign);
+    positionedContent.forEach(c => storage.put('content', c));
   };
 
   const handleCampaignUpdate = (updatedCampaign: Campaign) => {
     setCampaigns(prev => prev.map(c => c.id === updatedCampaign.id ? updatedCampaign : c));
+    storage.put('campaigns', updatedCampaign);
   };
 
-  if (checkingKey) {
-    return <div className="h-screen flex items-center justify-center bg-slate-50 text-slate-400">Loading...</div>;
+  const handleContentStoreUpdate = (newContentList: GeneratedContent[]) => {
+    setContentStore(newContentList);
+    // Persist all items in the list to ensuring sync
+    newContentList.forEach(c => storage.put('content', c));
+  };
+
+  // Safe handler for single item update to avoid race conditions with closures
+  const handleUpdateItem = (updatedItem: GeneratedContent) => {
+    setContentStore(prev => {
+      // Find if item exists, if not just return prev to be safe (or append if needed)
+      const exists = prev.some(c => c.id === updatedItem.id);
+      if (exists) {
+        return prev.map(c => c.id === updatedItem.id ? updatedItem : c);
+      }
+      return [...prev, updatedItem];
+    });
+    storage.put('content', updatedItem);
+  };
+
+  if (checkingKey || isLoadingData) {
+    return (
+      <div className="h-screen flex flex-col items-center justify-center bg-slate-50 text-slate-400">
+        <Loader2 className="animate-spin mb-2" size={32} />
+        <span>Loading MarketGen AI...</span>
+      </div>
+    );
   }
 
   // Key Selection Screen
@@ -249,6 +328,7 @@ function App() {
               <ContentGenerator 
                 products={products} 
                 onComplete={handleCampaignCreated} 
+                onUpdateItem={handleUpdateItem}
               />
             } 
           />
@@ -259,8 +339,9 @@ function App() {
                 campaigns={campaigns}
                 products={products}
                 contentStore={contentStore}
-                onUpdateContent={setContentStore}
+                onUpdateContent={handleContentStoreUpdate}
                 onUpdateCampaign={handleCampaignUpdate}
+                onUpdateItem={handleUpdateItem}
               />
             } 
           />
