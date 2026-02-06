@@ -250,12 +250,12 @@ function App() {
   };
 
   const handleContentStoreUpdate = (newContentList: GeneratedContent[]) => {
-    // Use functional update to merge new items without overwriting in-flight upload results
+    // Capture the merged list so persistence/uploads use merged data (not stale input)
+    let mergedList: GeneratedContent[] = [];
+
     setContentStore(prev => {
-      // Build lookup of previous state for preserving in-flight image data
       const prevMap = new Map(prev.map(c => [c.id, c]));
-      // newContentList is the authoritative list — items not in it (e.g. placeholders) are removed
-      return newContentList.map(item => {
+      mergedList = newContentList.map(item => {
         const existing = prevMap.get(item.id);
         if (existing) {
           return {
@@ -269,10 +269,11 @@ function App() {
         }
         return item;
       });
+      return mergedList;
     });
 
-    // Upload images to Storage, then persist with download URLs
-    newContentList.forEach(item => {
+    // Use merged data for uploads & persistence (updater runs synchronously)
+    for (const item of mergedList) {
       const hasBase64 = (item.imageUrl && isBase64DataUrl(item.imageUrl)) ||
         item.storyboard?.some(s => s.imageUrl && isBase64DataUrl(s.imageUrl));
 
@@ -280,13 +281,18 @@ function App() {
         uploadContentImages(item)
           .then(processed => {
             storage.put('content', processed);
-            setContentStore(prev => prev.map(c => c.id === processed.id ? processed : c));
+            // Only update image fields to avoid overwriting concurrent changes
+            setContentStore(prev => prev.map(c => c.id === processed.id ? {
+              ...c,
+              imageUrl: processed.imageUrl || c.imageUrl,
+              storyboard: processed.storyboard || c.storyboard,
+            } : c));
           })
           .catch(() => storage.put('content', item));
       } else {
-        storage.put('content', item);
+        storage.debouncedPut('content', item);
       }
-    });
+    }
   };
 
   // Safe handler for single item update to avoid race conditions with closures
@@ -321,7 +327,7 @@ function App() {
         })
         .catch(() => storage.put('content', updatedItem));
     } else {
-      storage.put('content', updatedItem);
+      storage.debouncedPut('content', updatedItem);
     }
   };
 

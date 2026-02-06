@@ -120,7 +120,7 @@ describe('generateVideoFromStoryboard', () => {
       { sceneNumber: 1, imagePrompt: 'p', voiceover: 'v' }, // no imageUrl
     ];
 
-    await expect(generateVideoFromStoryboard(scenes)).rejects.toThrow('No images available');
+    await expect(generateVideoFromStoryboard(scenes, 'test-id')).rejects.toThrow('No images available');
   });
 
   it('slices to at most 3 scenes for reference images', async () => {
@@ -154,7 +154,7 @@ describe('generateVideoFromStoryboard', () => {
       { sceneNumber: 4, imagePrompt: 'p4', voiceover: 'v4', imageUrl: 'https://example.com/4.png' },
     ];
 
-    await expect(generateVideoFromStoryboard(scenes)).rejects.toThrow();
+    await expect(generateVideoFromStoryboard(scenes, 'test-id')).rejects.toThrow();
 
     // fetch called 3 times (not 4) because of .slice(0, 3)
     expect(global.fetch).toHaveBeenCalledTimes(3);
@@ -162,29 +162,26 @@ describe('generateVideoFromStoryboard', () => {
     global.FileReader = originalFileReader;
   });
 
-  it('calls generateVideo Cloud Function and returns blob URL', async () => {
+  it('calls generateVideo Cloud Function and returns download URL', async () => {
     const scenes: Scene[] = [
       { sceneNumber: 1, imagePrompt: 'p', voiceover: 'v', imageUrl: 'data:image/png;base64,abc' },
     ];
 
+    const mockVideoUrl = 'https://firebasestorage.googleapis.com/v0/b/test/o/video.mp4?alt=media&token=abc';
+
     // Mock the video Cloud Function response
     callableMocks['generateVideo']?.mockResolvedValueOnce({
-      data: { videoBase64: 'dmlkZW8=', mimeType: 'video/mp4' },
+      data: { videoUrl: mockVideoUrl },
     });
 
-    // Mock URL.createObjectURL
-    const originalCreateObjectURL = global.URL.createObjectURL;
-    global.URL.createObjectURL = vi.fn().mockReturnValue('blob:mock-video-url');
-
-    const result = await generateVideoFromStoryboard(scenes);
+    const result = await generateVideoFromStoryboard(scenes, 'content-123');
 
     expect(callableMocks['generateVideo']).toHaveBeenCalledTimes(1);
     const callArg = callableMocks['generateVideo'].mock.calls[0][0];
     expect(callArg.referenceImages).toHaveLength(1);
+    expect(callArg.contentId).toBe('content-123');
     expect(callArg.prompt).toContain('cinematic');
-    expect(result).toBe('blob:mock-video-url');
-
-    global.URL.createObjectURL = originalCreateObjectURL;
+    expect(result).toBe(mockVideoUrl);
   });
 
   it('throws on Cloud Function error', async () => {
@@ -194,7 +191,7 @@ describe('generateVideoFromStoryboard', () => {
 
     callableMocks['generateVideo']?.mockRejectedValueOnce(new Error('Video generation failed'));
 
-    await expect(generateVideoFromStoryboard(scenes)).rejects.toThrow('Video generation failed');
+    await expect(generateVideoFromStoryboard(scenes, 'test-id')).rejects.toThrow('Video generation failed');
   });
 });
 

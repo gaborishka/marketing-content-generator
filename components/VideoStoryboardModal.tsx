@@ -49,7 +49,7 @@ export const VideoStoryboardModal: React.FC<VideoStoryboardModalProps> = ({
     onUpdate({ ...content, videoStatus: 'generating' });
 
     try {
-      const videoUrl = await generateVideoFromStoryboard(content.storyboard);
+      const videoUrl = await generateVideoFromStoryboard(content.storyboard, content.id);
       onUpdate({ 
         ...content, 
         videoUrl, 

@@ -1,6 +1,11 @@
 import { onCall, HttpsError } from "firebase-functions/v2/https";
 import { defineSecret } from "firebase-functions/params";
 import { GoogleGenAI } from "@google/genai";
+import { initializeApp } from "firebase-admin/app";
+import { getStorage } from "firebase-admin/storage";
+import { randomUUID } from "crypto";
+
+initializeApp();
 
 const GEMINI_API_KEY = defineSecret("GEMINI_API_KEY");
 
@@ -96,9 +101,12 @@ export const generateVideo = onCall(
       throw new HttpsError("unauthenticated", "Authentication required.");
     }
 
-    const { referenceImages, prompt } = request.data;
+    const { referenceImages, prompt, contentId } = request.data;
     if (!referenceImages || referenceImages.length === 0) {
       throw new HttpsError("invalid-argument", "referenceImages is required.");
+    }
+    if (!contentId || typeof contentId !== "string") {
+      throw new HttpsError("invalid-argument", "contentId is required.");
     }
 
     const ai = getAiClient();
@@ -151,10 +159,28 @@ export const generateVideo = onCall(
       }
 
       const arrayBuffer = await videoRes.arrayBuffer();
-      const videoBase64 = Buffer.from(arrayBuffer).toString("base64");
+      const videoBuffer = Buffer.from(arrayBuffer);
       const mimeType = videoRes.headers.get("content-type") || "video/mp4";
 
-      return { videoBase64, mimeType };
+      // Upload to Firebase Storage
+      const uid = request.auth!.uid;
+      const filePath = `users/${uid}/content/${contentId}/video.mp4`;
+      const bucket = getStorage().bucket();
+      const file = bucket.file(filePath);
+      const downloadToken = randomUUID();
+
+      await file.save(videoBuffer, {
+        metadata: {
+          contentType: mimeType,
+          metadata: { firebaseStorageDownloadTokens: downloadToken },
+        },
+      });
+
+      // Construct Firebase download URL
+      const encodedPath = encodeURIComponent(filePath);
+      const videoUrl = `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodedPath}?alt=media&token=${downloadToken}`;
+
+      return { videoUrl };
     } catch (error: any) {
       if (error instanceof HttpsError) throw error;
       console.error("generateVideo error:", error);

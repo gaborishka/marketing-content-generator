@@ -5,7 +5,7 @@ import { Product, Campaign, GeneratedContent, Scene, ComplianceRule } from "../t
 
 const generateContentFn = httpsCallable<any, { text: string }>(functions, 'generateContent');
 const generateImageFn = httpsCallable<any, { mimeType: string; data: string }>(functions, 'generateImage');
-const generateVideoFn = httpsCallable<any, { videoBase64: string; mimeType: string }>(functions, 'generateVideo');
+const generateVideoFn = httpsCallable<any, { videoUrl: string }>(functions, 'generateVideo');
 
 // Helper to convert image (base64 or URL) to video reference object
 const MAX_IMAGE_SIZE = 10 * 1024 * 1024; // 10 MB
@@ -87,7 +87,7 @@ export const generateImage = async (product: Product | undefined, contextText: s
   }
 };
 
-export const generateVideoFromStoryboard = async (storyboard: Scene[]): Promise<string> => {
+export const generateVideoFromStoryboard = async (storyboard: Scene[], contentId: string): Promise<string> => {
   const validScenes = storyboard.filter(s => s.imageUrl);
 
   if (validScenes.length === 0) {
@@ -107,14 +107,11 @@ export const generateVideoFromStoryboard = async (storyboard: Scene[]): Promise<
   try {
     const result = await generateVideoFn({
       referenceImages,
+      contentId,
       prompt: "A cinematic commercial video. Smooth transitions between scenes. High quality, 4k.",
     });
 
-    const { videoBase64, mimeType } = result.data;
-    // Convert base64 to blob URL for playback
-    const byteArray = Uint8Array.from(atob(videoBase64), c => c.charCodeAt(0));
-    const blob = new Blob([byteArray], { type: mimeType });
-    return URL.createObjectURL(blob);
+    return result.data.videoUrl;
   } catch (error) {
     console.error("Video Generation Error:", error);
     throw error;

@@ -8,6 +8,21 @@ const getUserId = (): string => {
   return user.uid;
 };
 
+// Debounced writes: coalesce rapid put() calls per storeName/id into a single Firestore write
+const pendingWrites = new Map<string, ReturnType<typeof setTimeout>>();
+const DEBOUNCE_MS = 1000;
+
+export const debouncedPut = (storeName: string, item: any): void => {
+  const key = `${storeName}:${item.id}`;
+  const existing = pendingWrites.get(key);
+  if (existing) clearTimeout(existing);
+
+  pendingWrites.set(key, setTimeout(() => {
+    pendingWrites.delete(key);
+    put(storeName, item).catch(e => console.error(`Debounced write failed for ${key}`, e));
+  }, DEBOUNCE_MS));
+};
+
 export const getAll = async <T>(storeName: string): Promise<T[]> => {
   try {
     const userId = getUserId();
