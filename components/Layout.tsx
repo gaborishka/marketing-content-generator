@@ -33,6 +33,7 @@ const SidebarItem = ({ icon: Icon, label, path, active }: { icon: any, label: st
 export const Layout: React.FC<LayoutProps> = ({ children }) => {
   const location = useLocation();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const isCanvasRoute = /^\/campaigns\/[^/]+$/.test(location.pathname) && location.pathname !== '/campaigns/new';
 
   return (
     <div className="flex h-screen bg-slate-50 overflow-hidden">
@@ -114,8 +115,8 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
         </header>
 
         {/* Scrollable Area */}
-        <main className="flex-1 overflow-auto p-4 md:p-8 bg-slate-50/50">
-          <div className="max-w-7xl mx-auto animate-fadeIn">
+        <main className={`flex-1 bg-slate-50/50 ${isCanvasRoute ? 'overflow-hidden' : 'overflow-auto p-4 md:p-8'}`}>
+          <div className={`animate-fadeIn ${isCanvasRoute ? 'h-full' : 'max-w-7xl mx-auto'}`}>
             {children}
           </div>
         </main>

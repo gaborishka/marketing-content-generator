@@ -82,20 +82,26 @@ export const CanvasBoard: React.FC<CanvasBoardProps> = ({ items, onItemsChange, 
     document.body.style.cursor = 'default';
   };
 
-  const handleWheel = (e: React.WheelEvent) => {
-    if (e.ctrlKey || e.metaKey) {
-      e.preventDefault();
-      const zoomSensitivity = 0.001;
-      const newScale = Math.min(Math.max(0.1, scale - e.deltaY * zoomSensitivity), 3);
-      setScale(newScale);
-    } else {
-      // Pan with wheel
-      setOffset(prev => ({
-        x: prev.x - e.deltaX,
-        y: prev.y - e.deltaY
-      }));
-    }
-  };
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+
+    const handleWheel = (e: WheelEvent) => {
+      if (e.ctrlKey || e.metaKey) {
+        e.preventDefault();
+        const zoomSensitivity = 0.001;
+        setScale(prev => Math.min(Math.max(0.1, prev - e.deltaY * zoomSensitivity), 3));
+      } else {
+        setOffset(prev => ({
+          x: prev.x - e.deltaX,
+          y: prev.y - e.deltaY
+        }));
+      }
+    };
+
+    el.addEventListener('wheel', handleWheel, { passive: false });
+    return () => el.removeEventListener('wheel', handleWheel);
+  }, []);
 
   // Card Handlers
   const handleCardMouseDown = (e: React.MouseEvent, id: string) => {
@@ -204,7 +210,6 @@ export const CanvasBoard: React.FC<CanvasBoardProps> = ({ items, onItemsChange, 
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
         onMouseLeave={handleMouseUp}
-        onWheel={handleWheel}
         style={{
           backgroundImage: 'radial-gradient(#cbd5e1 1px, transparent 1px)',
           backgroundSize: `${20 * scale}px ${20 * scale}px`, // Dynamic grid based on scale

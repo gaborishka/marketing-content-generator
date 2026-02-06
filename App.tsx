@@ -177,7 +177,7 @@ function App() {
           await Promise.all(INITIAL_CONTENT.map(c => storage.put('content', c)));
           setContentStore(INITIAL_CONTENT);
         } else {
-          setContentStore(dbContent);
+          setContentStore(dbContent.filter(c => c.status !== 'generating'));
         }
       } catch (e) {
         console.error("Failed to load data from storage", e);

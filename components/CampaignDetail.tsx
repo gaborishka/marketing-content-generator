@@ -1,18 +1,36 @@
 
 import React, { useState, useEffect } from 'react';
-import { 
-  ArrowLeft, 
-  Download, 
-  Send, 
-  Filter, 
-  History, 
-  Monitor,
+import {
+  ArrowLeft,
+  Download,
+  Send,
+  Filter,
+  History,
   RefreshCw,
   Loader2,
   Sparkles,
   FileText,
   Package,
-  Info
+  Info,
+  Users,
+  GraduationCap,
+  Heart,
+  Globe,
+  Baby,
+  Pill,
+  Building2,
+  Stethoscope,
+  UserCircle,
+  Mail,
+  Linkedin,
+  Twitter,
+  Instagram,
+  Globe2,
+  Video,
+  Facebook,
+  Youtube,
+  Image,
+  Tv
 } from 'lucide-react';
 import { useParams, Link } from 'react-router-dom';
 import { Campaign, Product, GeneratedContent } from '../types';
@@ -29,29 +47,36 @@ interface CampaignDetailProps {
   onUpdateItem: (content: GeneratedContent) => void;
 }
 
-const AVAILABLE_AUDIENCES = [
-  'Healthcare Professionals', 
-  'Patients', 
-  'Caregivers', 
-  'General Public', 
-  'Students', 
-  'Seniors', 
-  'Parents',
-  'Pharmacists',
-  'Hospital Administrators'
+interface ChipOption {
+  label: string;
+  icon: React.ElementType;
+  selectedClasses: string;
+  selectedIconClass: string;
+}
+
+const AVAILABLE_AUDIENCES: ChipOption[] = [
+  { label: 'Healthcare Professionals', icon: Stethoscope, selectedClasses: 'bg-blue-50 border-blue-300 text-blue-700 ring-1 ring-blue-200', selectedIconClass: 'text-blue-500' },
+  { label: 'Patients', icon: Heart, selectedClasses: 'bg-rose-50 border-rose-300 text-rose-700 ring-1 ring-rose-200', selectedIconClass: 'text-rose-500' },
+  { label: 'Caregivers', icon: Users, selectedClasses: 'bg-amber-50 border-amber-300 text-amber-700 ring-1 ring-amber-200', selectedIconClass: 'text-amber-500' },
+  { label: 'General Public', icon: Globe, selectedClasses: 'bg-slate-100 border-slate-400 text-slate-700 ring-1 ring-slate-300', selectedIconClass: 'text-slate-600' },
+  { label: 'Students', icon: GraduationCap, selectedClasses: 'bg-indigo-50 border-indigo-300 text-indigo-700 ring-1 ring-indigo-200', selectedIconClass: 'text-indigo-500' },
+  { label: 'Seniors', icon: UserCircle, selectedClasses: 'bg-teal-50 border-teal-300 text-teal-700 ring-1 ring-teal-200', selectedIconClass: 'text-teal-500' },
+  { label: 'Parents', icon: Baby, selectedClasses: 'bg-pink-50 border-pink-300 text-pink-700 ring-1 ring-pink-200', selectedIconClass: 'text-pink-500' },
+  { label: 'Pharmacists', icon: Pill, selectedClasses: 'bg-emerald-50 border-emerald-300 text-emerald-700 ring-1 ring-emerald-200', selectedIconClass: 'text-emerald-500' },
+  { label: 'Hospital Administrators', icon: Building2, selectedClasses: 'bg-violet-50 border-violet-300 text-violet-700 ring-1 ring-violet-200', selectedIconClass: 'text-violet-500' },
 ];
 
-const AVAILABLE_CHANNELS = [
-  'Email', 
-  'LinkedIn', 
-  'Twitter', 
-  'Instagram', 
-  'Web', 
-  'TikTok', 
-  'Facebook', 
-  'YouTube',
-  'Pinterest',
-  'Video Storyboard'
+const AVAILABLE_CHANNELS: ChipOption[] = [
+  { label: 'Email', icon: Mail, selectedClasses: 'bg-blue-50 border-blue-300 text-blue-700 ring-1 ring-blue-200', selectedIconClass: 'text-blue-500' },
+  { label: 'LinkedIn', icon: Linkedin, selectedClasses: 'bg-sky-50 border-sky-300 text-sky-700 ring-1 ring-sky-200', selectedIconClass: 'text-sky-500' },
+  { label: 'Twitter', icon: Twitter, selectedClasses: 'bg-cyan-50 border-cyan-300 text-cyan-700 ring-1 ring-cyan-200', selectedIconClass: 'text-cyan-500' },
+  { label: 'Instagram', icon: Instagram, selectedClasses: 'bg-pink-50 border-pink-300 text-pink-700 ring-1 ring-pink-200', selectedIconClass: 'text-pink-500' },
+  { label: 'Web', icon: Globe2, selectedClasses: 'bg-emerald-50 border-emerald-300 text-emerald-700 ring-1 ring-emerald-200', selectedIconClass: 'text-emerald-500' },
+  { label: 'TikTok', icon: Tv, selectedClasses: 'bg-fuchsia-50 border-fuchsia-300 text-fuchsia-700 ring-1 ring-fuchsia-200', selectedIconClass: 'text-fuchsia-500' },
+  { label: 'Facebook', icon: Facebook, selectedClasses: 'bg-indigo-50 border-indigo-300 text-indigo-700 ring-1 ring-indigo-200', selectedIconClass: 'text-indigo-500' },
+  { label: 'YouTube', icon: Youtube, selectedClasses: 'bg-red-50 border-red-300 text-red-700 ring-1 ring-red-200', selectedIconClass: 'text-red-500' },
+  { label: 'Pinterest', icon: Image, selectedClasses: 'bg-rose-50 border-rose-300 text-rose-700 ring-1 ring-rose-200', selectedIconClass: 'text-rose-500' },
+  { label: 'Video Storyboard', icon: Video, selectedClasses: 'bg-violet-50 border-violet-300 text-violet-700 ring-1 ring-violet-200', selectedIconClass: 'text-violet-500' },
 ];
 
 export const CampaignDetail: React.FC<CampaignDetailProps> = ({ 
@@ -408,49 +433,60 @@ export const CampaignDetail: React.FC<CampaignDetailProps> = ({
 
            {/* Section: Target Audiences */}
            <div className="p-4 border-b border-slate-100">
-             <div className="flex items-center justify-between mb-2">
+             <div className="flex items-center justify-between mb-3">
                <h3 className="font-semibold text-slate-900">Target Audiences</h3>
+               <span className="text-[10px] font-medium text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded-full">
+                 {campaign.targetAudiences.length} selected
+               </span>
              </div>
-             
-             <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
-               {AVAILABLE_AUDIENCES.map(aud => (
-                 <label key={aud} className="flex items-center space-x-2.5 p-1.5 rounded hover:bg-slate-50 cursor-pointer transition-colors">
-                   <div className="relative flex items-center">
-                     <input 
-                      type="checkbox"
-                      className="peer h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
-                      checked={campaign.targetAudiences.includes(aud)}
-                      onChange={() => handleToggleAudience(aud)}
-                     />
-                   </div>
-                   <span className="text-xs text-slate-700 font-medium">{aud}</span>
-                 </label>
-               ))}
+
+             <div className="flex flex-wrap gap-2">
+               {AVAILABLE_AUDIENCES.map(({ label: aud, icon: Icon, selectedClasses, selectedIconClass }) => {
+                 const isSelected = campaign.targetAudiences.includes(aud);
+                 return (
+                   <button
+                     key={aud}
+                     onClick={() => handleToggleAudience(aud)}
+                     className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all duration-150 border cursor-pointer ${
+                       isSelected
+                         ? `${selectedClasses} shadow-sm`
+                         : 'bg-white border-slate-200 text-slate-500 hover:border-slate-300 hover:bg-slate-50'
+                     }`}
+                   >
+                     <Icon size={13} className={isSelected ? selectedIconClass : 'text-slate-400'} />
+                     <span>{aud}</span>
+                   </button>
+                 );
+               })}
              </div>
            </div>
 
            {/* Section: Channels */}
            <div className="p-4 border-b border-slate-100">
-             <div className="flex items-center justify-between mb-2">
+             <div className="flex items-center justify-between mb-3">
                 <h3 className="font-semibold text-slate-900">Channels</h3>
+                <span className="text-[10px] font-medium text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded-full">
+                  {campaign.channels.length} selected
+                </span>
              </div>
-             <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
-                {AVAILABLE_CHANNELS.map(ch => (
-                  <label key={ch} className="flex items-center space-x-2.5 p-1.5 rounded hover:bg-slate-50 cursor-pointer transition-colors">
-                   <div className="relative flex items-center">
-                     <input 
-                      type="checkbox"
-                      className="peer h-4 w-4 rounded border-slate-300 text-purple-600 focus:ring-purple-500"
-                      checked={campaign.channels.includes(ch)}
-                      onChange={() => handleToggleChannel(ch)}
-                     />
-                   </div>
-                   <div className="flex items-center text-xs text-slate-700 font-medium">
-                     <Monitor size={12} className="mr-2 text-slate-400" />
-                     {ch}
-                   </div>
-                 </label>
-                ))}
+             <div className="flex flex-wrap gap-2">
+                {AVAILABLE_CHANNELS.map(({ label: ch, icon: Icon, selectedClasses, selectedIconClass }) => {
+                  const isSelected = campaign.channels.includes(ch);
+                  return (
+                    <button
+                      key={ch}
+                      onClick={() => handleToggleChannel(ch)}
+                      className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all duration-150 border cursor-pointer ${
+                        isSelected
+                          ? `${selectedClasses} shadow-sm`
+                          : 'bg-white border-slate-200 text-slate-500 hover:border-slate-300 hover:bg-slate-50'
+                      }`}
+                    >
+                      <Icon size={13} className={isSelected ? selectedIconClass : 'text-slate-400'} />
+                      <span>{ch}</span>
+                    </button>
+                  );
+                })}
              </div>
            </div>
 
