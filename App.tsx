@@ -301,11 +301,13 @@ function App() {
     setContentStore(prev => {
       const existing = prev.find(c => c.id === updatedItem.id);
       if (existing) {
-        // Merge: take image/storyboard from the update, preserve position and other fields
+        // Merge: take image/storyboard/video from the update, preserve position and other fields
         return prev.map(c => c.id === updatedItem.id ? {
           ...existing,
           imageUrl: updatedItem.imageUrl || existing.imageUrl,
           storyboard: updatedItem.storyboard || existing.storyboard,
+          videoUrl: updatedItem.videoUrl || existing.videoUrl,
+          videoStatus: updatedItem.videoStatus || existing.videoStatus,
         } : c);
       }
       return [...prev, updatedItem];

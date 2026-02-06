@@ -4,6 +4,9 @@ import { GoogleGenAI, Type, VideoGenerationReferenceType } from "@google/genai";
 import { initializeApp } from "firebase-admin/app";
 import { getStorage } from "firebase-admin/storage";
 import { randomUUID } from "crypto";
+import { join } from "path";
+import { readFile, unlink } from "fs/promises";
+import { tmpdir } from "os";
 
 initializeApp();
 
@@ -215,22 +218,19 @@ export const generateVideo = onCall(
         );
       }
 
-      const downloadLink = operation.response?.generatedVideos?.[0]?.video?.uri;
-      if (!downloadLink) {
-        throw new HttpsError("internal", "No video URI returned.");
+      const generatedVideo = operation.response?.generatedVideos?.[0];
+      if (!generatedVideo) {
+        console.error("generateVideo: empty response.", JSON.stringify(operation.response));
+        throw new HttpsError("internal", "No video in response.");
       }
 
-      // Download the video server-side using auth header (avoids key in URL/logs)
-      const videoRes = await fetch(downloadLink, {
-        headers: { "x-goog-api-key": GEMINI_API_KEY.value() },
-      });
-      if (!videoRes.ok) {
-        throw new HttpsError("internal", `Failed to download video: ${videoRes.statusText}`);
-      }
+      // Download via SDK (handles Gemini API auth automatically)
+      const tmpPath = join(tmpdir(), `video-${contentId}-${Date.now()}.mp4`);
+      await ai.files.download({ file: generatedVideo, downloadPath: tmpPath });
 
-      const arrayBuffer = await videoRes.arrayBuffer();
-      const videoBuffer = Buffer.from(arrayBuffer);
-      const mimeType = videoRes.headers.get("content-type") || "video/mp4";
+      const videoBuffer = await readFile(tmpPath);
+      // Clean up temp file (fire-and-forget)
+      unlink(tmpPath).catch(() => {});
 
       // Upload to Firebase Storage
       const uid = request.auth!.uid;
@@ -241,7 +241,7 @@ export const generateVideo = onCall(
 
       await file.save(videoBuffer, {
         metadata: {
-          contentType: mimeType,
+          contentType: "video/mp4",
           metadata: { firebaseStorageDownloadTokens: downloadToken },
         },
       });
