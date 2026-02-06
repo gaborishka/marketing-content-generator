@@ -249,7 +249,27 @@ function App() {
   };
 
   const handleContentStoreUpdate = (newContentList: GeneratedContent[]) => {
-    setContentStore(newContentList);
+    // Use functional update to merge new items without overwriting in-flight upload results
+    setContentStore(prev => {
+      // Build lookup of previous state for preserving in-flight image data
+      const prevMap = new Map(prev.map(c => [c.id, c]));
+      // newContentList is the authoritative list — items not in it (e.g. placeholders) are removed
+      return newContentList.map(item => {
+        const existing = prevMap.get(item.id);
+        if (existing) {
+          return {
+            ...item,
+            imageUrl: item.imageUrl || existing.imageUrl,
+            storyboard: item.storyboard?.map((s, i) => ({
+              ...s,
+              imageUrl: s.imageUrl || existing.storyboard?.[i]?.imageUrl || '',
+            })) || existing.storyboard,
+          };
+        }
+        return item;
+      });
+    });
+
     // Upload images to Storage, then persist with download URLs
     newContentList.forEach(item => {
       const hasBase64 = (item.imageUrl && isBase64DataUrl(item.imageUrl)) ||
@@ -272,9 +292,14 @@ function App() {
   const handleUpdateItem = (updatedItem: GeneratedContent) => {
     // Immediate: update React state with base64 so user sees image instantly
     setContentStore(prev => {
-      const exists = prev.some(c => c.id === updatedItem.id);
-      if (exists) {
-        return prev.map(c => c.id === updatedItem.id ? updatedItem : c);
+      const existing = prev.find(c => c.id === updatedItem.id);
+      if (existing) {
+        // Merge: take image/storyboard from the update, preserve position and other fields
+        return prev.map(c => c.id === updatedItem.id ? {
+          ...existing,
+          imageUrl: updatedItem.imageUrl || existing.imageUrl,
+          storyboard: updatedItem.storyboard || existing.storyboard,
+        } : c);
       }
       return [...prev, updatedItem];
     });
@@ -287,7 +312,11 @@ function App() {
       uploadContentImages(updatedItem)
         .then(processed => {
           storage.put('content', processed);
-          setContentStore(prev => prev.map(c => c.id === processed.id ? processed : c));
+          setContentStore(prev => prev.map(c => c.id === processed.id ? {
+            ...c,
+            imageUrl: processed.imageUrl || c.imageUrl,
+            storyboard: processed.storyboard || c.storyboard,
+          } : c));
         })
         .catch(() => storage.put('content', updatedItem));
     } else {

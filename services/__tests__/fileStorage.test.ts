@@ -23,6 +23,10 @@ vi.mock('../firebase', () => ({
   storage: mockStorageInstance,
 }));
 
+vi.mock('../authService', () => ({
+  getCurrentUser: () => ({ uid: 'test-user-123' }),
+}));
+
 import { isBase64DataUrl, uploadBase64Image, uploadContentImages } from '../fileStorage';
 import type { GeneratedContent } from '../../types';
 
@@ -93,7 +97,7 @@ describe('uploadContentImages', () => {
     y: 0,
   };
 
-  it('uploads hero image and returns updated item', async () => {
+  it('uploads hero image to user-scoped path and returns updated item', async () => {
     const item: GeneratedContent = {
       ...baseItem,
       imageUrl: 'data:image/png;base64,herodata',
@@ -102,11 +106,11 @@ describe('uploadContentImages', () => {
     const result = await uploadContentImages(item);
 
     expect(mockUploadString).toHaveBeenCalledTimes(1);
-    expect(mockRef).toHaveBeenCalledWith(mockStorageInstance, 'content/item-1/hero.png');
+    expect(mockRef).toHaveBeenCalledWith(mockStorageInstance, 'users/test-user-123/content/item-1/hero.png');
     expect(result.imageUrl).toBe('https://firebasestorage.example.com/download');
   });
 
-  it('uploads storyboard scene images', async () => {
+  it('uploads storyboard scene images to user-scoped paths', async () => {
     const item: GeneratedContent = {
       ...baseItem,
       storyboard: [
@@ -118,8 +122,8 @@ describe('uploadContentImages', () => {
     const result = await uploadContentImages(item);
 
     expect(mockUploadString).toHaveBeenCalledTimes(2);
-    expect(mockRef).toHaveBeenCalledWith(mockStorageInstance, 'content/item-1/scene-1.png');
-    expect(mockRef).toHaveBeenCalledWith(mockStorageInstance, 'content/item-1/scene-2.png');
+    expect(mockRef).toHaveBeenCalledWith(mockStorageInstance, 'users/test-user-123/content/item-1/scene-1.png');
+    expect(mockRef).toHaveBeenCalledWith(mockStorageInstance, 'users/test-user-123/content/item-1/scene-2.png');
     expect(result.storyboard![0].imageUrl).toBe('https://firebasestorage.example.com/download');
     expect(result.storyboard![1].imageUrl).toBe('https://firebasestorage.example.com/download');
   });

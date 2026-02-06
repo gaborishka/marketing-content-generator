@@ -8,19 +8,35 @@ const generateImageFn = httpsCallable<any, { mimeType: string; data: string }>(f
 const generateVideoFn = httpsCallable<any, { videoBase64: string; mimeType: string }>(functions, 'generateVideo');
 
 // Helper to convert image (base64 or URL) to video reference object
+const MAX_IMAGE_SIZE = 10 * 1024 * 1024; // 10 MB
+const FETCH_TIMEOUT_MS = 30_000; // 30 seconds
+
 const createReferenceImage = async (imageData: string) => {
   let base64Data = imageData;
 
   // If it's a URL (not base64), fetch and convert to base64
   if (!imageData.startsWith('data:')) {
-    const response = await fetch(imageData);
-    const blob = await response.blob();
-    base64Data = await new Promise<string>((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onloadend = () => resolve(reader.result as string);
-      reader.onerror = reject;
-      reader.readAsDataURL(blob);
-    });
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+    try {
+      const response = await fetch(imageData, { signal: controller.signal });
+      const contentLength = response.headers.get('content-length');
+      if (contentLength && parseInt(contentLength, 10) > MAX_IMAGE_SIZE) {
+        throw new Error(`Image too large (${Math.round(parseInt(contentLength, 10) / 1024 / 1024)}MB). Max ${MAX_IMAGE_SIZE / 1024 / 1024}MB.`);
+      }
+      const blob = await response.blob();
+      if (blob.size > MAX_IMAGE_SIZE) {
+        throw new Error(`Image too large (${Math.round(blob.size / 1024 / 1024)}MB). Max ${MAX_IMAGE_SIZE / 1024 / 1024}MB.`);
+      }
+      base64Data = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onloadend = () => resolve(reader.result as string);
+        reader.onerror = reject;
+        reader.readAsDataURL(blob);
+      });
+    } finally {
+      clearTimeout(timeoutId);
+    }
   }
 
   // Extract real mime type from data URL

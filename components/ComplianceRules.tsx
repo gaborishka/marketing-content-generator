@@ -132,7 +132,11 @@ export const ComplianceRules: React.FC<ComplianceRulesProps> = ({ rules, onCreat
                     <Pencil size={14} />
                   </button>
                   <button
-                    onClick={() => onDelete(rule.id)}
+                    onClick={() => {
+                      if (window.confirm(`Delete "${rule.name}"? This cannot be undone.`)) {
+                        onDelete(rule.id);
+                      }
+                    }}
                     className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
                   >
                     <Trash2 size={14} />

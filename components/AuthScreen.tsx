@@ -2,6 +2,25 @@ import React, { useState } from 'react';
 import { Sparkles, Mail, Lock, Loader2 } from 'lucide-react';
 import { signUpWithEmail, signInWithEmail, signInWithGoogle } from '../services/authService';
 
+const FIREBASE_ERROR_MESSAGES: Record<string, string> = {
+  'auth/email-already-in-use': 'This email is already registered. Try signing in instead.',
+  'auth/invalid-email': 'Please enter a valid email address.',
+  'auth/weak-password': 'Password must be at least 6 characters.',
+  'auth/user-not-found': 'No account found with this email.',
+  'auth/wrong-password': 'Incorrect password. Please try again.',
+  'auth/invalid-credential': 'Invalid email or password. Please try again.',
+  'auth/too-many-requests': 'Too many attempts. Please try again later.',
+  'auth/popup-closed-by-user': 'Sign-in popup was closed. Please try again.',
+};
+
+const getAuthErrorMessage = (err: unknown): string => {
+  if (err && typeof err === 'object' && 'code' in err) {
+    const code = (err as { code: string }).code;
+    return FIREBASE_ERROR_MESSAGES[code] || (err as { message?: string }).message || 'Authentication failed';
+  }
+  return (err as { message?: string })?.message || 'Authentication failed';
+};
+
 export const AuthScreen: React.FC = () => {
   const [isSignUp, setIsSignUp] = useState(false);
   const [email, setEmail] = useState('');
@@ -19,8 +38,8 @@ export const AuthScreen: React.FC = () => {
       } else {
         await signInWithEmail(email, password);
       }
-    } catch (err: any) {
-      setError(err.message || 'Authentication failed');
+    } catch (err: unknown) {
+      setError(getAuthErrorMessage(err));
     } finally {
       setLoading(false);
     }
@@ -31,8 +50,8 @@ export const AuthScreen: React.FC = () => {
     setLoading(true);
     try {
       await signInWithGoogle();
-    } catch (err: any) {
-      setError(err.message || 'Google sign-in failed');
+    } catch (err: unknown) {
+      setError(getAuthErrorMessage(err));
     } finally {
       setLoading(false);
     }

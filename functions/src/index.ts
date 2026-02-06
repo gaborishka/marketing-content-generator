@@ -9,7 +9,7 @@ const getAiClient = () => new GoogleGenAI({ apiKey: GEMINI_API_KEY.value() });
 // ── generateContent ──────────────────────────────────────────────────────────
 
 export const generateContent = onCall(
-  { timeoutSeconds: 120, memory: "512MiB", secrets: [GEMINI_API_KEY] },
+  { timeoutSeconds: 120, memory: "512MiB", secrets: [GEMINI_API_KEY], cors: true },
   async (request) => {
     if (!request.auth) {
       throw new HttpsError("unauthenticated", "Authentication required.");
@@ -44,7 +44,7 @@ export const generateContent = onCall(
 // ── generateImage ────────────────────────────────────────────────────────────
 
 export const generateImage = onCall(
-  { timeoutSeconds: 120, memory: "1GiB", secrets: [GEMINI_API_KEY] },
+  { timeoutSeconds: 120, memory: "1GiB", secrets: [GEMINI_API_KEY], cors: true },
   async (request) => {
     if (!request.auth) {
       throw new HttpsError("unauthenticated", "Authentication required.");
@@ -90,7 +90,7 @@ export const generateImage = onCall(
 // ── generateVideo ────────────────────────────────────────────────────────────
 
 export const generateVideo = onCall(
-  { timeoutSeconds: 540, memory: "2GiB", secrets: [GEMINI_API_KEY] },
+  { timeoutSeconds: 540, memory: "2GiB", secrets: [GEMINI_API_KEY], cors: true },
   async (request) => {
     if (!request.auth) {
       throw new HttpsError("unauthenticated", "Authentication required.");
@@ -102,6 +102,9 @@ export const generateVideo = onCall(
     }
 
     const ai = getAiClient();
+    const startTime = Date.now();
+    // Leave 30s safety margin before the 540s Cloud Functions timeout
+    const maxPollMs = (540 - 30) * 1000;
 
     try {
       let operation = await ai.models.generateVideos({
@@ -115,8 +118,14 @@ export const generateVideo = onCall(
         },
       });
 
-      // Poll for completion
+      // Poll for completion with timeout guard
       while (!operation.done) {
+        if (Date.now() - startTime > maxPollMs) {
+          throw new HttpsError(
+            "deadline-exceeded",
+            "Video generation timed out. The video may still be processing — try again later."
+          );
+        }
         await new Promise((resolve) => setTimeout(resolve, 5000));
         operation = await ai.operations.getVideosOperation({ operation });
       }
@@ -133,8 +142,10 @@ export const generateVideo = onCall(
         throw new HttpsError("internal", "No video URI returned.");
       }
 
-      // Download the video server-side using the API key (never exposed to client)
-      const videoRes = await fetch(`${downloadLink}&key=${GEMINI_API_KEY.value()}`);
+      // Download the video server-side using auth header (avoids key in URL/logs)
+      const videoRes = await fetch(downloadLink, {
+        headers: { "x-goog-api-key": GEMINI_API_KEY.value() },
+      });
       if (!videoRes.ok) {
         throw new HttpsError("internal", `Failed to download video: ${videoRes.statusText}`);
       }

@@ -144,7 +144,8 @@ export const CampaignDetail: React.FC<CampaignDetailProps> = ({
     if (needsMigration) {
       onUpdateCampaign({ ...campaign, channels: [...new Set(migrated)] });
     }
-  }, [campaign?.id]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [campaign?.id, onUpdateCampaign]);
 
   // Clear status message after 3 seconds
   useEffect(() => {
@@ -561,7 +562,7 @@ export const CampaignDetail: React.FC<CampaignDetailProps> = ({
                        'border-slate-100 bg-white'
                      }`}>
                        <div className="flex items-center space-x-2 mb-2">
-                         <img src={p.imageUrl} className="w-6 h-6 rounded object-cover" />
+                         <img src={p.imageUrl} alt={p.name} className="w-6 h-6 rounded object-cover" />
                          <span className="text-xs font-semibold text-slate-800 truncate">{p.name}</span>
                        </div>
                        <div className="flex gap-1.5">
@@ -600,7 +601,7 @@ export const CampaignDetail: React.FC<CampaignDetailProps> = ({
                      <div className="absolute top-0 right-0 bg-blue-600 text-white text-[10px] px-1.5 py-0.5 rounded-bl font-bold">PRIMARY</div>
                      <div className="flex items-center space-x-2">
                        <div className="w-8 h-8 bg-slate-100 rounded object-cover flex-shrink-0">
-                          <img src={primaryProduct.imageUrl} className="w-full h-full rounded object-cover" />
+                          <img src={primaryProduct.imageUrl} alt={primaryProduct.name} className="w-full h-full rounded object-cover" />
                        </div>
                        <div className="min-w-0">
                          <div className="font-semibold text-sm text-slate-800 truncate">{primaryProduct.name}</div>
@@ -621,7 +622,7 @@ export const CampaignDetail: React.FC<CampaignDetailProps> = ({
                      {secondaryProducts.map(p => (
                        <div key={p.id} className="flex items-center space-x-2 p-2 bg-slate-50 rounded border border-slate-100">
                           <div className="w-5 h-5 bg-slate-200 rounded flex-shrink-0">
-                             <img src={p.imageUrl} className="w-full h-full rounded object-cover" />
+                             <img src={p.imageUrl} alt={p.name} className="w-full h-full rounded object-cover" />
                           </div>
                           <span className="text-xs text-slate-700 truncate">{p.name}</span>
                        </div>

@@ -113,9 +113,14 @@ export const CHANNEL_FORMATS: Record<string, string[]> = {
   'Video Storyboard': ['Video Storyboard'],
 };
 
-export function getParentChannel(subFormat: string): string {
-  for (const [parent, formats] of Object.entries(CHANNEL_FORMATS)) {
-    if (formats.includes(subFormat)) return parent;
+// Pre-computed reverse lookup: sub-format name → parent channel name
+const SUB_FORMAT_TO_PARENT: Record<string, string> = {};
+for (const [parent, formats] of Object.entries(CHANNEL_FORMATS)) {
+  for (const fmt of formats) {
+    SUB_FORMAT_TO_PARENT[fmt] = parent;
   }
-  return subFormat;
+}
+
+export function getParentChannel(subFormat: string): string {
+  return SUB_FORMAT_TO_PARENT[subFormat] ?? subFormat;
 }

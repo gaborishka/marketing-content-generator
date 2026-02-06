@@ -1,6 +1,6 @@
 [
   {
-    "origin": ["http://localhost:3000", "http://localhost:3003"],
+    "origin": ["http://localhost:3000", "http://localhost:3003", "https://YOUR_PROJECT_ID.web.app"],
     "method": ["GET", "POST", "PUT", "DELETE", "HEAD"],
     "maxAgeSeconds": 3600,
     "responseHeader": ["Content-Type", "Authorization"]

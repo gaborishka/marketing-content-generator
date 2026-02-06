@@ -7,5 +7,9 @@
   },
   "functions": {
     "source": "functions"
+  },
+  "emulators": {
+    "functions": { "port": 5001 },
+    "ui": { "enabled": false }
   }
 }
