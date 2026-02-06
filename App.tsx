@@ -196,7 +196,9 @@ function App() {
   useEffect(() => {
     const checkKey = async () => {
       try {
-        if ((window as any).aistudio && await (window as any).aistudio.hasSelectedApiKey()) {
+        if (process.env.API_KEY || process.env.GEMINI_API_KEY) {
+          setHasApiKey(true);
+        } else if ((window as any).aistudio && await (window as any).aistudio.hasSelectedApiKey()) {
           setHasApiKey(true);
         }
       } catch (e) {
