@@ -163,7 +163,7 @@ function App() {
     return unsubscribe;
   }, []);
 
-  // Load Data from IndexedDB on Mount (only when authenticated)
+  // Load Data from Firestore on Mount (only when authenticated)
   useEffect(() => {
     if (!currentUser) {
       setIsLoadingData(false);
@@ -207,6 +207,7 @@ function App() {
         setProducts(MOCK_PRODUCTS);
         setCampaigns(MOCK_CAMPAIGNS);
         setContentStore(INITIAL_CONTENT);
+        setComplianceRules([]);
       } finally {
         setIsLoadingData(false);
       }
