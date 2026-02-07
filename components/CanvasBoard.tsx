@@ -1,11 +1,12 @@
 import React, { useRef, useState, useEffect } from 'react';
-import { 
-  ZoomIn, 
-  ZoomOut, 
-  Maximize, 
-  MousePointer2, 
-  Hand, 
-  Grid
+import {
+  ZoomIn,
+  ZoomOut,
+  Maximize,
+  MousePointer2,
+  Hand,
+  Grid,
+  Plus
 } from 'lucide-react';
 import { GeneratedContent } from '../types';
 import { CanvasCard } from './CanvasCard';
@@ -273,15 +274,35 @@ export const CanvasBoard: React.FC<CanvasBoardProps> = ({ items, onItemsChange, 
     <div className="relative w-full h-full overflow-hidden bg-slate-100 flex flex-col">
       {/* Toolbar */}
       <div className="absolute bottom-6 left-1/2 -translate-x-1/2 bg-white/90 backdrop-blur-md border border-slate-200 shadow-lg rounded-full px-4 py-2 flex items-center space-x-4 z-50">
+        {onCanvasDoubleClick && (
+          <div className="flex items-center border-r border-slate-200 pr-4">
+            <button
+              onClick={() => {
+                const el = containerRef.current;
+                if (!el) return;
+                const rect = el.getBoundingClientRect();
+                const pos = screenToCanvas(
+                  rect.left + rect.width / 2,
+                  rect.top + rect.height / 2
+                );
+                onCanvasDoubleClick(pos);
+              }}
+              className="p-2 rounded-lg text-white bg-blue-600 hover:bg-blue-700 transition-colors shadow-sm shadow-blue-500/20"
+              title="Add Content"
+            >
+              <Plus size={18} />
+            </button>
+          </div>
+        )}
         <div className="flex items-center space-x-1 border-r border-slate-200 pr-4">
-           <button 
+           <button
              onClick={() => setInteractionMode('select')}
              className={`p-2 rounded-lg transition-colors ${interactionMode === 'select' ? 'bg-blue-100 text-blue-600' : 'text-slate-500 hover:bg-slate-100'}`}
              title="Select Mode (V)"
            >
              <MousePointer2 size={18} />
            </button>
-           <button 
+           <button
              onClick={() => setInteractionMode('pan')}
              className={`p-2 rounded-lg transition-colors ${interactionMode === 'pan' ? 'bg-blue-100 text-blue-600' : 'text-slate-500 hover:bg-slate-100'}`}
              title="Pan Mode (H)"
