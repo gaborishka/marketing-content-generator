@@ -310,16 +310,16 @@ components/
 
 ### Phase 2: Planner + Generator Agents
 
-- [ ] Create `functions/src/prompts/generator.prompt.ts` — prompt templates extracted from `services/geminiService.ts:132-180`
-- [ ] Create `functions/src/agents/planner.ts` — context assembly from Firestore (extract logic from `services/geminiService.ts:84-154`)
-  - [ ] Fetch campaign, products, compliance rule from Firestore
-  - [ ] Fetch existing content for deduplication
-  - [ ] Build channel × audience combinations (cap at 6, skip existing combos)
-  - [ ] Return typed `PlannerContext` with minimal, focused context
-- [ ] Create `functions/src/agents/generator.ts` — text generation via Gemini Flash
-  - [ ] `generateText()` — build prompt from PlannerContext, call Gemini, parse JSON, write content docs to Firestore
-  - [ ] Structured JSON schema for response (channel, audience, text, complianceScore, riskLevel, storyboard)
-- [ ] Verify: planner reads correct data, generator produces content docs in Firestore
+- [x] Create `functions/src/prompts/generator.prompt.ts` — prompt templates extracted from `services/geminiService.ts:132-180`
+- [x] Create `functions/src/agents/planner.ts` — context assembly from Firestore (extract logic from `services/geminiService.ts:84-154`)
+  - [x] Fetch campaign, products, compliance rule from Firestore
+  - [x] Fetch existing content for deduplication
+  - [x] Build channel × audience combinations (cap at 6, skip existing combos)
+  - [x] Return typed `PlannerContext` with minimal, focused context
+- [x] Create `functions/src/agents/generator.ts` — text generation via Gemini Flash
+  - [x] `generateText()` — build prompt from PlannerContext, call Gemini, parse JSON, write content docs to Firestore
+  - [x] Structured JSON schema for response (channel, audience, text, complianceScore, riskLevel, storyboard)
+- [x] Verify: planner reads correct data, generator produces content docs in Firestore
 
 ### Phase 3: Orchestrator + Cloud Function Entry Points
 
