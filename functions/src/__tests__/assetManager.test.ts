@@ -20,7 +20,7 @@ vi.mock("../utils/firestore", () => ({
 }));
 
 import { runAssetManager, AssetManagerInput } from "../agents/assetManager";
-import { ContentDoc } from "../types/pipeline";
+import { ContentDoc, getAspectRatioForChannel } from "../types/pipeline";
 
 // ── Fixtures ────────────────────────────────────────────────────────────────
 
@@ -96,10 +96,13 @@ describe("runAssetManager", () => {
     expect(result.data!.failureCount).toBe(0);
     expect(result.data!.totalImages).toBe(1);
 
-    // Verify Gemini was called with image model
+    // Verify Gemini was called with image model and correct aspect ratio (Twitter = 16:9)
     expect(mockGenerateContent).toHaveBeenCalledWith(
       expect.objectContaining({
         model: "gemini-3-pro-image-preview",
+        config: expect.objectContaining({
+          imageConfig: expect.objectContaining({ aspectRatio: "16:9" }),
+        }),
       })
     );
 
@@ -250,7 +253,7 @@ describe("runAssetManager", () => {
   });
 
   it("builds appropriate image prompts per channel", async () => {
-    const instagramDoc = makeContentDoc({ id: "ig-1", channel: "Instagram" });
+    const instagramDoc = makeContentDoc({ id: "ig-1", channel: "Instagram Post" });
     const emailDoc = makeContentDoc({ id: "em-1", channel: "Email Newsletter" });
 
     mockGenerateContent.mockResolvedValue(geminiImageResponse());
@@ -282,5 +285,106 @@ describe("runAssetManager", () => {
     expect(result.success).toBe(true);
     expect(result.data!.failureCount).toBe(1);
     expect(mockGenerateContent).not.toHaveBeenCalled();
+  });
+
+  it("uses 1:1 aspect ratio for Instagram Post", async () => {
+    const doc = makeContentDoc({ id: "ig-1", channel: "Instagram Post" });
+    mockGenerateContent.mockResolvedValue(geminiImageResponse());
+    mockUploadImageToStorage.mockResolvedValue({
+      downloadUrl: "https://storage.example.com/hero.png",
+      storagePath: "path",
+    });
+
+    await runAssetManager({ contentDocs: [doc], userId: "user-1" });
+
+    expect(mockGenerateContent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        config: expect.objectContaining({
+          imageConfig: expect.objectContaining({ aspectRatio: "1:1" }),
+        }),
+      })
+    );
+  });
+
+  it("uses 3:4 aspect ratio for Pinterest Pin", async () => {
+    const doc = makeContentDoc({ id: "pin-1", channel: "Pinterest Pin" });
+    mockGenerateContent.mockResolvedValue(geminiImageResponse());
+    mockUploadImageToStorage.mockResolvedValue({
+      downloadUrl: "https://storage.example.com/hero.png",
+      storagePath: "path",
+    });
+
+    await runAssetManager({ contentDocs: [doc], userId: "user-1" });
+
+    expect(mockGenerateContent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        config: expect.objectContaining({
+          imageConfig: expect.objectContaining({ aspectRatio: "3:4" }),
+        }),
+      })
+    );
+  });
+
+  it("falls back to 16:9 for unknown channels", async () => {
+    const doc = makeContentDoc({ id: "unk-1", channel: "Unknown Platform" });
+    mockGenerateContent.mockResolvedValue(geminiImageResponse());
+    mockUploadImageToStorage.mockResolvedValue({
+      downloadUrl: "https://storage.example.com/hero.png",
+      storagePath: "path",
+    });
+
+    await runAssetManager({ contentDocs: [doc], userId: "user-1" });
+
+    expect(mockGenerateContent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        config: expect.objectContaining({
+          imageConfig: expect.objectContaining({ aspectRatio: "16:9" }),
+        }),
+      })
+    );
+  });
+
+  it("uses 16:9 for Video Storyboard scene images", async () => {
+    const doc = makeStoryboardDoc();
+    mockGenerateContent.mockResolvedValue(geminiImageResponse());
+    mockUploadImageToStorage.mockResolvedValue({
+      downloadUrl: "https://storage.example.com/scene.png",
+      storagePath: "path",
+    });
+
+    await runAssetManager({ contentDocs: [doc], userId: "user-1" });
+
+    // All 3 scene image calls should use 16:9
+    for (const call of mockGenerateContent.mock.calls) {
+      expect(call[0].config.imageConfig.aspectRatio).toBe("16:9");
+    }
+  });
+});
+
+// ── getAspectRatioForChannel unit tests ──────────────────────────────────────
+
+describe("getAspectRatioForChannel", () => {
+  it("returns 1:1 for Instagram Post", () => {
+    expect(getAspectRatioForChannel("Instagram Post")).toBe("1:1");
+  });
+
+  it("returns 9:16 for Instagram Story", () => {
+    expect(getAspectRatioForChannel("Instagram Story")).toBe("9:16");
+  });
+
+  it("returns 4:3 for LinkedIn Post", () => {
+    expect(getAspectRatioForChannel("LinkedIn Post")).toBe("4:3");
+  });
+
+  it("returns 3:4 for Pinterest Pin", () => {
+    expect(getAspectRatioForChannel("Pinterest Pin")).toBe("3:4");
+  });
+
+  it("returns 16:9 for Tweet", () => {
+    expect(getAspectRatioForChannel("Tweet")).toBe("16:9");
+  });
+
+  it("falls back to 16:9 for unmapped channels", () => {
+    expect(getAspectRatioForChannel("Carrier Pigeon")).toBe("16:9");
   });
 });

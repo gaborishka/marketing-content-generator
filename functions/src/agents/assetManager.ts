@@ -5,7 +5,7 @@
 import { getGeminiClient } from "../utils/gemini";
 import { uploadImageToStorage } from "../utils/storage";
 import { updateContentDoc } from "../utils/firestore";
-import { AgentResult, ContentDoc, SceneDoc } from "../types/pipeline";
+import { AgentResult, ContentDoc, ImageAspectRatio, SceneDoc, getAspectRatioForChannel } from "../types/pipeline";
 
 const IMAGE_MODEL = "gemini-3-pro-image-preview";
 const CONCURRENCY_LIMIT = 3;
@@ -23,7 +23,7 @@ export interface AssetManagerResult {
 
 // ── Generate a single image from a prompt ───────────────────────────────────
 
-async function generateImage(prompt: string): Promise<{ data: string; mimeType: string } | null> {
+async function generateImage(prompt: string, aspectRatio: ImageAspectRatio = "16:9"): Promise<{ data: string; mimeType: string } | null> {
   const ai = getGeminiClient();
 
   const response = await ai.models.generateContent({
@@ -31,7 +31,7 @@ async function generateImage(prompt: string): Promise<{ data: string; mimeType: 
     contents: { parts: [{ text: prompt }] },
     config: {
       imageConfig: {
-        aspectRatio: "16:9",
+        aspectRatio,
         imageSize: "1K",
       },
     },
@@ -70,7 +70,8 @@ async function processRegularContent(
   userId: string
 ): Promise<boolean> {
   const prompt = buildImagePrompt(doc);
-  const imageResult = await generateImage(prompt);
+  const aspectRatio = getAspectRatioForChannel(doc.channel);
+  const imageResult = await generateImage(prompt, aspectRatio);
 
   if (!imageResult) {
     return false;
@@ -101,12 +102,13 @@ async function processStoryboardContent(
 
   let anySuccess = false;
   const updatedScenes: SceneDoc[] = [...doc.storyboard];
+  const aspectRatio = getAspectRatioForChannel(doc.channel);
 
   for (let i = 0; i < doc.storyboard.length; i++) {
     const scene = doc.storyboard[i];
 
     try {
-      const imageResult = await generateImage(scene.imagePrompt);
+      const imageResult = await generateImage(scene.imagePrompt, aspectRatio);
       if (!imageResult) continue;
 
       const imageBuffer = Buffer.from(imageResult.data, "base64");

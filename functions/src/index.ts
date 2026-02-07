@@ -25,6 +25,7 @@ interface GenerateContentInput {
 
 interface GenerateImageInput {
   prompt: string;
+  aspectRatio?: "1:1" | "3:4" | "4:3" | "9:16" | "16:9";
 }
 
 interface ReferenceImageEntry {
@@ -85,7 +86,7 @@ export const generateImage = onCall(
       throw new HttpsError("unauthenticated", "Authentication required.");
     }
 
-    const { prompt } = request.data as GenerateImageInput;
+    const { prompt, aspectRatio } = request.data as GenerateImageInput;
     if (!prompt) {
       throw new HttpsError("invalid-argument", "prompt is required.");
     }
@@ -98,7 +99,7 @@ export const generateImage = onCall(
         contents: { parts: [{ text: prompt }] },
         config: {
           imageConfig: {
-            aspectRatio: "16:9",
+            aspectRatio: aspectRatio || "16:9",
             imageSize: "1K",
           },
         },
