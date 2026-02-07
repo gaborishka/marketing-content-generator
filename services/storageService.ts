@@ -23,6 +23,15 @@ export const debouncedPut = (storeName: string, item: any): void => {
   }, DEBOUNCE_MS));
 };
 
+export const cancelDebouncedPut = (storeName: string, id: string): void => {
+  const key = `${storeName}:${id}`;
+  const existing = pendingWrites.get(key);
+  if (existing) {
+    clearTimeout(existing);
+    pendingWrites.delete(key);
+  }
+};
+
 export const getAll = async <T>(storeName: string): Promise<T[]> => {
   try {
     const userId = getUserId();
