@@ -183,6 +183,10 @@ export const CampaignDetail: React.FC<CampaignDetailProps> = ({
     setCreationModal({ position: canvasPos, initialText: text, initialImageDataUrl: imageDataUrl });
   };
 
+  const handleDeleteContent = (id: string) => {
+    onUpdateContent(contentStore.filter(c => c.id !== id));
+  };
+
   const handleManualContentCreate = (newContent: GeneratedContent) => {
     onUpdateContent([...contentStore, newContent]);
   };
@@ -903,6 +907,7 @@ export const CampaignDetail: React.FC<CampaignDetailProps> = ({
                 items={campaignContent}
                 onItemsChange={handleCanvasUpdate}
                 onEdit={(id) => setEditingContentId(id)}
+                onDelete={handleDeleteContent}
                 onDoubleClick={(id) => setDetailContentId(id)}
                 onCanvasDoubleClick={handleCanvasDoubleClick}
                 onPasteOnCanvas={handlePasteOnCanvas}

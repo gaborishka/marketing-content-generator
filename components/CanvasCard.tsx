@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   MoreHorizontal,
   ShieldCheck,
@@ -12,7 +12,8 @@ import {
   Film,
   Play,
   Image as ImageIcon,
-  Check
+  Check,
+  Trash2
 } from 'lucide-react';
 import { GeneratedContent, getParentChannel } from '../types';
 import { TwitterPreview } from './previews/TwitterPreview';
@@ -42,6 +43,20 @@ const CanvasCardInner: React.FC<CanvasCardProps> = ({
   onDelete,
   onDoubleClick
 }) => {
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  // Close menu on outside click
+  useEffect(() => {
+    if (!menuOpen) return;
+    const handleClick = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, [menuOpen]);
   // Agent step progression for generating state
   const agentSteps = useMemo(() => [
     `Analyzing campaign brief...`,
@@ -212,11 +227,29 @@ const CanvasCardInner: React.FC<CanvasCardProps> = ({
           )}
         </div>
         
-        <div className="flex items-center space-x-1">
+        <div className="flex items-center space-x-1 relative" ref={menuRef}>
           {content.videoStatus === 'completed' && <div className="text-[10px] bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded font-medium">Ready</div>}
-          <button className="p-1 hover:bg-slate-200 rounded text-slate-400">
+          <button
+            className="p-1 hover:bg-slate-200 rounded text-slate-400"
+            onClick={(e) => { e.stopPropagation(); setMenuOpen(!menuOpen); }}
+          >
             <MoreHorizontal size={14} />
           </button>
+          {menuOpen && (
+            <div className="absolute right-0 top-full mt-1 bg-white border border-slate-200 rounded-lg shadow-lg py-1 z-50 min-w-[140px]">
+              <button
+                className="w-full flex items-center space-x-2 px-3 py-1.5 text-xs text-red-600 hover:bg-red-50 transition-colors"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setMenuOpen(false);
+                  onDelete(content.id);
+                }}
+              >
+                <Trash2 size={12} />
+                <span>Delete</span>
+              </button>
+            </div>
+          )}
         </div>
       </div>
 
