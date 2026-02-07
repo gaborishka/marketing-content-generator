@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   ArrowLeft,
   Download,
@@ -47,6 +47,7 @@ import { generateMarketingContent } from '../services/geminiService';
 import { VideoStoryboardModal } from './VideoStoryboardModal';
 import { ContentDetailModal } from './ContentDetailModal';
 import { ContentCreationModal } from './ContentCreationModal';
+import { FilterPanel, ContentFilters, INITIAL_FILTERS } from './FilterPanel';
 
 interface CampaignDetailProps {
   campaigns: Campaign[];
@@ -110,6 +111,10 @@ export const CampaignDetail: React.FC<CampaignDetailProps> = ({
     initialText?: string;
     initialImageDataUrl?: string;
   } | null>(null);
+  const [filters, setFilters] = useState<ContentFilters>(INITIAL_FILTERS);
+  const [isFilterPanelOpen, setIsFilterPanelOpen] = useState(false);
+  const filterButtonRef = useRef<HTMLButtonElement>(null);
+  const filterPanelRef = useRef<HTMLDivElement>(null);
 
   const campaign = campaigns.find(c => c.id === id);
   const primaryProduct = products.find(p => p.id === campaign?.primaryProductId);
@@ -167,12 +172,62 @@ export const CampaignDetail: React.FC<CampaignDetailProps> = ({
   const activeEditingContent = contentStore.find(c => c.id === editingContentId);
   const activeDetailContent = contentStore.find(c => c.id === detailContentId);
 
+  // Filtered content for the canvas
+  const filteredContent = useMemo(() => {
+    return campaignContent.filter(item => {
+      // Always show generating cards regardless of filters
+      if (item.status === 'generating') return true;
+
+      if (filters.channels.size > 0) {
+        const parent = getParentChannel(item.channel);
+        if (!filters.channels.has(parent)) return false;
+      }
+      if (filters.audiences.size > 0 && !filters.audiences.has(item.audience)) return false;
+      if (filters.statuses.size > 0 && !filters.statuses.has(item.status)) return false;
+      if (filters.complianceMin > 0 && item.complianceScore < filters.complianceMin) return false;
+      return true;
+    });
+  }, [campaignContent, filters]);
+
+  const activeFilterCount = useMemo(() => {
+    let count = 0;
+    if (filters.channels.size > 0) count++;
+    if (filters.audiences.size > 0) count++;
+    if (filters.statuses.size > 0) count++;
+    if (filters.complianceMin > 0) count++;
+    return count;
+  }, [filters]);
+
+  // Close filter panel on click outside or Escape
+  useEffect(() => {
+    if (!isFilterPanelOpen) return;
+    const handleMouseDown = (e: MouseEvent) => {
+      if (
+        filterPanelRef.current && !filterPanelRef.current.contains(e.target as Node) &&
+        filterButtonRef.current && !filterButtonRef.current.contains(e.target as Node)
+      ) {
+        setIsFilterPanelOpen(false);
+      }
+    };
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setIsFilterPanelOpen(false);
+    };
+    document.addEventListener('mousedown', handleMouseDown);
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', handleMouseDown);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [isFilterPanelOpen]);
+
   // Generate button validation
   const canGenerate = campaign ? campaign.targetAudiences.length > 0 && campaign.channels.length > 0 : false;
 
   const handleCanvasUpdate = (updatedItems: GeneratedContent[]) => {
     const otherContent = contentStore.filter(c => c.campaignId !== id);
-    onUpdateContent([...otherContent, ...updatedItems]);
+    const updatedIds = new Set(updatedItems.map(i => i.id));
+    const hiddenItems = campaignContent.filter(c => !updatedIds.has(c.id));
+    onUpdateContent([...otherContent, ...hiddenItems, ...updatedItems]);
   };
 
   const handleCanvasDoubleClick = (canvasPos: { x: number; y: number }) => {
@@ -466,10 +521,35 @@ export const CampaignDetail: React.FC<CampaignDetailProps> = ({
         </div>
 
         <div className="flex items-center space-x-3">
-          <button className="flex items-center space-x-2 px-3 py-1.5 text-sm font-medium text-slate-600 bg-white border border-slate-300 rounded-lg hover:bg-slate-50">
-            <Filter size={16} />
-            <span>Filters</span>
-          </button>
+          <div className="relative">
+            <button
+              ref={filterButtonRef}
+              onClick={() => setIsFilterPanelOpen(prev => !prev)}
+              className={`flex items-center space-x-2 px-3 py-1.5 text-sm font-medium rounded-lg transition-colors ${
+                activeFilterCount > 0
+                  ? 'text-blue-700 bg-blue-50 border border-blue-300 hover:bg-blue-100'
+                  : 'text-slate-600 bg-white border border-slate-300 hover:bg-slate-50'
+              }`}
+            >
+              <Filter size={16} />
+              <span>Filters</span>
+              {activeFilterCount > 0 && (
+                <span className="inline-flex items-center justify-center w-5 h-5 text-[10px] font-bold text-white bg-blue-600 rounded-full">
+                  {activeFilterCount}
+                </span>
+              )}
+            </button>
+            {isFilterPanelOpen && (
+              <FilterPanel
+                ref={filterPanelRef}
+                filters={filters}
+                onFiltersChange={setFilters}
+                onClearAll={() => setFilters(INITIAL_FILTERS)}
+                onClose={() => setIsFilterPanelOpen(false)}
+                campaignContent={campaignContent}
+              />
+            )}
+          </div>
           <button className="flex items-center space-x-2 px-3 py-1.5 text-sm font-medium text-slate-600 bg-white border border-slate-300 rounded-lg hover:bg-slate-50">
             <History size={16} />
             <span>History</span>
@@ -902,9 +982,27 @@ export const CampaignDetail: React.FC<CampaignDetailProps> = ({
                  </div>
                </div>
              </div>
+           ) : filteredContent.length === 0 && campaignContent.length > 0 ? (
+             <div className="absolute inset-0 flex items-center justify-center">
+               <div className="text-center max-w-sm px-8">
+                 <div className="inline-flex items-center justify-center w-16 h-16 bg-slate-100 rounded-full mb-4">
+                   <Filter size={28} className="text-slate-400" />
+                 </div>
+                 <h2 className="text-lg font-bold text-slate-700 mb-2">No matching content</h2>
+                 <p className="text-sm text-slate-500 mb-4">
+                   {campaignContent.length} card{campaignContent.length !== 1 ? 's are' : ' is'} hidden by your current filters.
+                 </p>
+                 <button
+                   onClick={() => setFilters(INITIAL_FILTERS)}
+                   className="text-sm text-blue-600 hover:text-blue-800 font-medium"
+                 >
+                   Clear all filters
+                 </button>
+               </div>
+             </div>
            ) : (
              <CanvasBoard
-                items={campaignContent}
+                items={filteredContent}
                 onItemsChange={handleCanvasUpdate}
                 onEdit={(id) => setEditingContentId(id)}
                 onDelete={handleDeleteContent}
