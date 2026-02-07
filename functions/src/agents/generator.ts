@@ -2,7 +2,7 @@
 // Builds prompts from PlannerContext, calls Gemini, writes content docs to Firestore.
 
 import { getGeminiClient } from "../utils/gemini";
-import { writeContentDoc } from "../utils/firestore";
+import { writeContentDoc, updateContentDoc } from "../utils/firestore";
 import {
   PlannerContext,
   AgentResult,
@@ -162,15 +162,22 @@ export async function regenerateText(
       }));
     }
 
-    const updatedDoc: ContentDoc = {
-      ...failedDoc,
+    const updatedFields: Partial<ContentDoc> = {
       text: item.text,
       complianceScore: item.complianceScore,
       riskLevel: item.riskLevel,
+    };
+    if (storyboard) {
+      updatedFields.storyboard = storyboard;
+    }
+
+    await updateContentDoc(failedDoc.id, updatedFields);
+
+    const updatedDoc: ContentDoc = {
+      ...failedDoc,
+      ...updatedFields,
       storyboard: storyboard || failedDoc.storyboard,
     };
-
-    await writeContentDoc(updatedDoc);
 
     return { success: true, data: updatedDoc };
   } catch (error: any) {

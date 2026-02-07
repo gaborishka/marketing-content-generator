@@ -4,6 +4,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const mockGenerateContent = vi.fn();
 const mockWriteContentDoc = vi.fn().mockResolvedValue(undefined);
+const mockUpdateContentDoc = vi.fn().mockResolvedValue(undefined);
 
 vi.mock("../utils/gemini", () => ({
   getGeminiClient: () => ({
@@ -15,6 +16,7 @@ vi.mock("../utils/gemini", () => ({
 
 vi.mock("../utils/firestore", () => ({
   writeContentDoc: (...args: any[]) => mockWriteContentDoc(...args),
+  updateContentDoc: (...args: any[]) => mockUpdateContentDoc(...args),
 }));
 
 import { generateText, regenerateText } from "../agents/generator";
@@ -220,7 +222,12 @@ describe("regenerateText", () => {
     expect(result.data!.complianceScore).toBe(92);
     expect(result.data!.id).toBe(failedDoc.id); // preserves original ID
     expect(result.data!.campaignId).toBe("camp-1");
-    expect(mockWriteContentDoc).toHaveBeenCalledTimes(1);
+    expect(mockUpdateContentDoc).toHaveBeenCalledTimes(1);
+    expect(mockUpdateContentDoc).toHaveBeenCalledWith(failedDoc.id, expect.objectContaining({
+      text: "Discover the industry-leading Widget X!",
+      complianceScore: 92,
+      riskLevel: "low",
+    }));
   });
 
   it("returns error on parse failure", async () => {

@@ -130,7 +130,7 @@ describe("runAssetManager", () => {
 
     expect(result.success).toBe(true);
     expect(result.data!.successCount).toBe(1); // 1 doc succeeded
-    expect(result.data!.totalImages).toBe(3); // 3 scenes
+    expect(result.data!.totalImages).toBe(1); // 1 content doc
 
     // 3 Gemini calls for 3 scenes
     expect(mockGenerateContent).toHaveBeenCalledTimes(3);

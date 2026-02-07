@@ -130,6 +130,11 @@ export const generateImage = onCall(
 
 const MAX_IMAGE_SIZE = 10 * 1024 * 1024; // 10 MB
 
+const ALLOWED_IMAGE_HOSTS = [
+  "firebasestorage.googleapis.com",
+  "storage.googleapis.com",
+];
+
 const resolveReferenceImage = async (entry: ReferenceImageEntry) => {
   // Already has inline bytes — pass through
   if (entry.image?.imageBytes) return entry;
@@ -139,7 +144,21 @@ const resolveReferenceImage = async (entry: ReferenceImageEntry) => {
     throw new HttpsError("invalid-argument", "Reference image must have image.imageBytes or imageUrl.");
   }
 
-  const res = await fetch(url);
+  // Validate URL: only allow HTTPS to known hosts (prevent SSRF)
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    throw new HttpsError("invalid-argument", "Invalid image URL.");
+  }
+  if (parsed.protocol !== "https:") {
+    throw new HttpsError("invalid-argument", "Image URL must use HTTPS.");
+  }
+  if (!ALLOWED_IMAGE_HOSTS.some((host) => parsed.hostname === host || parsed.hostname.endsWith(`.${host}`))) {
+    throw new HttpsError("invalid-argument", `Image URL host not allowed: ${parsed.hostname}`);
+  }
+
+  const res = await fetch(url, { redirect: "error" });
   if (!res.ok) {
     throw new HttpsError("internal", `Failed to fetch reference image: ${res.statusText}`);
   }
@@ -270,7 +289,7 @@ interface GenerateCampaignInput {
 }
 
 export const generateCampaignContent = onCall(
-  { timeoutSeconds: 30, memory: "256MiB", secrets: [GEMINI_API_KEY], cors: true },
+  { timeoutSeconds: 30, memory: "256MiB", cors: true },
   async (request) => {
     if (!request.auth) {
       throw new HttpsError("unauthenticated", "Authentication required.");
@@ -335,15 +354,24 @@ export const processGenerationJob = onDocumentCreated(
       return;
     }
 
-    const result = await runOrchestrator({
-      campaignId,
-      userId,
-      jobId,
-      maxSeconds: 540,
-    });
+    try {
+      const result = await runOrchestrator({
+        campaignId,
+        userId,
+        jobId,
+        maxSeconds: 540,
+      });
 
-    if (!result.success) {
-      console.error(`Pipeline failed for job ${jobId}:`, result.error);
+      if (!result.success) {
+        console.error(`Pipeline failed for job ${jobId}:`, result.error);
+      }
+    } catch (error: any) {
+      console.error(`Unhandled pipeline error for job ${jobId}:`, error);
+      try {
+        await updateJobDoc(jobId, { status: "failed", phase: "Failed", error: error.message || "Unexpected pipeline error" });
+      } catch {
+        console.error(`Failed to mark job ${jobId} as failed after unhandled error`);
+      }
     }
   }
 );

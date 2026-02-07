@@ -105,6 +105,8 @@ export async function runOrchestrator(
       await progress.setPhase("compliance_check", "Checking compliance...", 55);
 
       let retryCount = 0;
+      // Track which docs still need compliance checking
+      let docsToCheck = contentDocs;
 
       while (retryCount <= MAX_COMPLIANCE_RETRIES) {
         if (budget.isExpired()) {
@@ -113,7 +115,7 @@ export async function runOrchestrator(
         }
 
         const complianceResult = await runComplianceCheck(
-          contentDocs,
+          docsToCheck,
           plannerContext.complianceRule.name,
           plannerContext.complianceRule.ruleText,
           retryCount
@@ -149,6 +151,8 @@ export async function runOrchestrator(
           break;
         }
 
+        const failedIds = new Set(failedResults.map((r) => r.contentId));
+
         for (const failedItem of failedResults) {
           const failedDoc = contentDocs.find((d) => d.id === failedItem.contentId);
           if (!failedDoc) continue;
@@ -173,6 +177,9 @@ export async function runOrchestrator(
             );
           }
         }
+
+        // On next iteration, only re-check the previously failed items
+        docsToCheck = contentDocs.filter((d) => failedIds.has(d.id));
       }
 
       await progress.update({

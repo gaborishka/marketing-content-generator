@@ -38,9 +38,9 @@ async function generateImage(prompt: string): Promise<{ data: string; mimeType: 
   });
 
   for (const part of response.candidates?.[0]?.content?.parts || []) {
-    if (part.inlineData) {
+    if (part.inlineData && part.inlineData.data) {
       return {
-        data: part.inlineData.data!,
+        data: part.inlineData.data,
         mimeType: part.inlineData.mimeType || "image/png",
       };
     }
@@ -166,12 +166,7 @@ export async function runAssetManager(
 
   let successCount = 0;
   let failureCount = 0;
-  const totalImages = contentDocs.reduce((count, doc) => {
-    if (doc.channel === "Video Storyboard" && doc.storyboard) {
-      return count + doc.storyboard.length;
-    }
-    return count + 1;
-  }, 0);
+  const totalImages = contentDocs.length;
 
   // Process in batches with concurrency limit
   for (let i = 0; i < contentDocs.length; i += CONCURRENCY_LIMIT) {

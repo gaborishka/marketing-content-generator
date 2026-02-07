@@ -93,11 +93,11 @@ export function subscribeToContent(
 ): Unsubscribe {
   const contentRef = collection(db, 'content');
   const userId = auth.currentUser?.uid;
-  const filters = [where('campaignId', '==', campaignId)];
-  if (userId) {
-    filters.push(where('userId', '==', userId));
+  if (!userId) {
+    onError?.(new Error('User not authenticated'));
+    return () => {};
   }
-  const q = query(contentRef, ...filters);
+  const q = query(contentRef, where('campaignId', '==', campaignId), where('userId', '==', userId));
 
   return onSnapshot(
     q,
