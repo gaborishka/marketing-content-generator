@@ -15,6 +15,7 @@ import * as storage from './services/storageService';
 import { uploadContentImages, isBase64DataUrl } from './services/fileStorage';
 import { AuthScreen } from './components/AuthScreen';
 import { onAuthChange, logOut } from './services/authService';
+import { getShopifyStatus, ShopifyStatus } from './services/shopifyService';
 import type { User } from 'firebase/auth';
 
 // Seed Data
@@ -30,7 +31,8 @@ const MOCK_PRODUCTS: Product[] = [
     features: ['12-hour relief', 'Non-drowsy', 'Easy-swallow coating'],
     imageUrl: 'https://images.unsplash.com/photo-1584308666744-24d5c474f2ae?auto=format&fit=crop&q=80&w=400',
     complianceFiles: ['fda-approval.pdf'],
-    marketingTags: ['pain relief', 'seniors', 'active lifestyle']
+    marketingTags: ['pain relief', 'seniors', 'active lifestyle'],
+    source: 'internal'
   },
   {
     id: 'prod-2',
@@ -43,7 +45,8 @@ const MOCK_PRODUCTS: Product[] = [
     features: ['Vitamin C + E', 'Cruelty-free', 'Dermatologist tested'],
     imageUrl: 'https://images.unsplash.com/photo-1620916566398-39f1143ab7be?auto=format&fit=crop&q=80&w=400',
     complianceFiles: [],
-    marketingTags: ['beauty', 'skincare', 'organic']
+    marketingTags: ['beauty', 'skincare', 'organic'],
+    source: 'internal'
   },
   {
     id: 'prod-3',
@@ -56,7 +59,8 @@ const MOCK_PRODUCTS: Product[] = [
     features: ['Caffeine-free', 'Natural ingredients', 'Clinically studied'],
     imageUrl: 'https://images.unsplash.com/photo-1550572017-edd951aa8f72?auto=format&fit=crop&q=80&w=400',
     complianceFiles: ['supplement-facts.pdf'],
-    marketingTags: ['focus', 'students', 'professionals']
+    marketingTags: ['focus', 'students', 'professionals'],
+    source: 'internal'
   }
 ];
 
@@ -155,6 +159,7 @@ function App() {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [isLoadingData, setIsLoadingData] = useState(true);
+  const [shopifyStatus, setShopifyStatus] = useState<ShopifyStatus>({ connected: false });
 
   // Listen for auth state changes
   useEffect(() => {
@@ -163,6 +168,15 @@ function App() {
       setAuthLoading(false);
     });
     return unsubscribe;
+  }, []);
+
+  const refreshShopifyStatus = useCallback(async () => {
+    try {
+      const status = await getShopifyStatus();
+      setShopifyStatus(status);
+    } catch {
+      // Shopify status fetch failed — non-critical
+    }
   }, []);
 
   // Load Data from Firestore on Mount (only when authenticated)
@@ -218,7 +232,8 @@ function App() {
       }
     };
     loadData();
-  }, [currentUser]);
+    refreshShopifyStatus();
+  }, [currentUser, refreshShopifyStatus]);
 
   const handleComplianceRuleCreate = (rule: ComplianceRule) => {
     setComplianceRules(prev => [rule, ...prev]);
@@ -243,6 +258,15 @@ function App() {
       return c;
     }));
   };
+
+  const refreshProducts = useCallback(async () => {
+    try {
+      const dbProducts = await storage.getAll<Product>('products');
+      setProducts(dbProducts.length > 0 ? dbProducts : MOCK_PRODUCTS);
+    } catch {
+      // Non-critical
+    }
+  }, []);
 
   const handleProductCreate = (product: Product) => {
     setProducts(prev => [product, ...prev]);
@@ -446,6 +470,9 @@ function App() {
               onCreate={handleProductCreate}
               onUpdate={handleProductUpdate}
               onDelete={handleProductDelete}
+              shopifyStatus={shopifyStatus}
+              onShopifyStatusChange={refreshShopifyStatus}
+              onProductsImported={refreshProducts}
             />
           } />
           <Route

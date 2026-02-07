@@ -1,13 +1,35 @@
-import { onCall, HttpsError } from "firebase-functions/v2/https";
+import { onCall, onRequest, HttpsError } from "firebase-functions/v2/https";
 import { onDocumentCreated } from "firebase-functions/v2/firestore";
 import { GoogleGenAI, Type, VideoGenerationReferenceType } from "@google/genai";
 import { initializeApp } from "firebase-admin/app";
 import { getStorage } from "firebase-admin/storage";
+import { getFirestore, FieldValue } from "firebase-admin/firestore";
 import { randomUUID } from "crypto";
 import { join } from "path";
 import { readFile, unlink } from "fs/promises";
 import { tmpdir } from "os";
 import { GEMINI_API_KEY } from "./utils/gemini";
+import {
+  SHOPIFY_CLIENT_ID,
+  SHOPIFY_CLIENT_SECRET,
+  fetchShopifyProducts as fetchShopifyProductsApi,
+  fetchShopifyProduct,
+  mapShopifyToProduct,
+} from "./utils/shopify";
+import {
+  buildShopifyAuthUrl,
+  verifyShopifyHmac,
+  exchangeCodeForToken,
+  isValidShopDomain,
+} from "./shopify/auth";
+import {
+  getShopifyConnection,
+  setShopifyConnection,
+  deleteShopifyConnection,
+  getShopifyProducts as getShopifyProductDocs,
+  setProductDoc,
+  deleteProductDoc,
+} from "./utils/firestore";
 
 initializeApp();
 
@@ -379,5 +401,298 @@ export const processGenerationJob = onDocumentCreated(
       }
       // Note: clearJobLock is handled by the orchestrator's finally block
     }
+  }
+);
+
+// ── Shopify OAuth ──────────────────────────────────────────────────────────
+
+const SHOPIFY_REDIRECT_PATH = "shopifyAuthCallback";
+
+export const shopifyAuthInit = onCall(
+  { timeoutSeconds: 10, memory: "256MiB", secrets: [SHOPIFY_CLIENT_ID], cors: true },
+  async (request) => {
+    if (!request.auth) {
+      throw new HttpsError("unauthenticated", "Authentication required.");
+    }
+
+    const { shopDomain } = request.data as { shopDomain: string };
+    if (!shopDomain || !isValidShopDomain(shopDomain)) {
+      throw new HttpsError("invalid-argument", "Invalid Shopify domain. Must be like your-store.myshopify.com");
+    }
+
+    const state = randomUUID();
+    const userId = request.auth.uid;
+
+    // Store state for verification on callback
+    const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 min TTL
+    await getFirestore().collection("shopifyOAuthStates").doc(state).set({
+      userId,
+      shopDomain,
+      createdAt: FieldValue.serverTimestamp(),
+      expiresAt: expiresAt.toISOString(),
+    });
+
+    // Build the redirect URL — assumes function is deployed at standard Firebase path
+    const projectId = process.env.GCLOUD_PROJECT || process.env.GCP_PROJECT || "";
+    const redirectUri = `https://us-central1-${projectId}.cloudfunctions.net/${SHOPIFY_REDIRECT_PATH}`;
+
+    const authUrl = buildShopifyAuthUrl(shopDomain, SHOPIFY_CLIENT_ID.value(), redirectUri, state);
+
+    return { authUrl };
+  }
+);
+
+export const shopifyAuthCallback = onRequest(
+  { timeoutSeconds: 30, memory: "256MiB", secrets: [SHOPIFY_CLIENT_ID, SHOPIFY_CLIENT_SECRET], cors: true },
+  async (req, res) => {
+    const query = req.query as Record<string, string>;
+    const { code, state, shop } = query;
+
+    if (!code || !state || !shop) {
+      res.status(400).send("Missing required OAuth parameters.");
+      return;
+    }
+
+    // Verify HMAC
+    if (!verifyShopifyHmac(query, SHOPIFY_CLIENT_SECRET.value())) {
+      res.status(403).send("HMAC verification failed.");
+      return;
+    }
+
+    // Verify state token
+    const stateRef = getFirestore().collection("shopifyOAuthStates").doc(state);
+    const stateDoc = await stateRef.get();
+
+    if (!stateDoc.exists) {
+      res.status(403).send("Invalid or expired state token.");
+      return;
+    }
+
+    const stateData = stateDoc.data()!;
+    const expiresAt = new Date(stateData.expiresAt);
+    if (expiresAt < new Date()) {
+      await stateRef.delete();
+      res.status(403).send("State token expired.");
+      return;
+    }
+
+    // Delete state token (one-time use)
+    await stateRef.delete();
+
+    const userId = stateData.userId as string;
+    const shopDomain = stateData.shopDomain as string;
+
+    try {
+      // Exchange code for access token
+      const tokenResponse = await exchangeCodeForToken(
+        shopDomain,
+        code,
+        SHOPIFY_CLIENT_ID.value(),
+        SHOPIFY_CLIENT_SECRET.value()
+      );
+
+      // Fetch shop name
+      let shopName: string | undefined;
+      try {
+        const shopRes = await fetch(`https://${shopDomain}/admin/api/2024-01/shop.json`, {
+          headers: { "X-Shopify-Access-Token": tokenResponse.access_token },
+        });
+        if (shopRes.ok) {
+          const shopData = await shopRes.json();
+          shopName = shopData.shop?.name;
+        }
+      } catch {
+        // Non-critical — proceed without shop name
+      }
+
+      // Store connection
+      await setShopifyConnection(userId, {
+        userId,
+        shopDomain,
+        accessToken: tokenResponse.access_token,
+        scope: tokenResponse.scope,
+        installedAt: new Date().toISOString(),
+        shopName,
+      });
+
+      // Redirect back to app
+      res.redirect("/#/products?shopify=connected");
+    } catch (error: any) {
+      console.error("shopifyAuthCallback error:", error);
+      res.status(500).send("Failed to complete Shopify authentication.");
+    }
+  }
+);
+
+export const shopifyDisconnect = onCall(
+  { timeoutSeconds: 10, memory: "256MiB", cors: true },
+  async (request) => {
+    if (!request.auth) {
+      throw new HttpsError("unauthenticated", "Authentication required.");
+    }
+
+    const userId = request.auth.uid;
+    await deleteShopifyConnection(userId);
+    return { success: true };
+  }
+);
+
+export const getShopifyConnectionStatus = onCall(
+  { timeoutSeconds: 10, memory: "256MiB", cors: true },
+  async (request) => {
+    if (!request.auth) {
+      throw new HttpsError("unauthenticated", "Authentication required.");
+    }
+
+    const userId = request.auth.uid;
+    const conn = await getShopifyConnection(userId);
+
+    if (!conn) {
+      return { connected: false };
+    }
+
+    return {
+      connected: true,
+      shopDomain: conn.shopDomain,
+      shopName: conn.shopName,
+    };
+  }
+);
+
+// ── Shopify Product Browsing & Import ──────────────────────────────────────
+
+export const browseShopifyProducts = onCall(
+  { timeoutSeconds: 30, memory: "256MiB", secrets: [SHOPIFY_CLIENT_ID], cors: true },
+  async (request) => {
+    if (!request.auth) {
+      throw new HttpsError("unauthenticated", "Authentication required.");
+    }
+
+    const userId = request.auth.uid;
+    const conn = await getShopifyConnection(userId);
+    if (!conn) {
+      throw new HttpsError("failed-precondition", "No Shopify store connected.");
+    }
+
+    const { query, limit, pageInfo } = request.data as {
+      query?: string;
+      limit?: number;
+      pageInfo?: string;
+    };
+
+    try {
+      const result = await fetchShopifyProductsApi(conn.shopDomain, conn.accessToken, {
+        query,
+        limit: limit || 20,
+        pageInfo,
+      });
+
+      // Map to Product shape for browsing (not persisted)
+      const products = result.products.map((sp) => mapShopifyToProduct(sp, userId));
+
+      return {
+        products,
+        nextPageInfo: result.nextPageInfo,
+        hasMore: result.hasMore,
+      };
+    } catch (error: any) {
+      console.error("browseShopifyProducts error:", error);
+      throw new HttpsError("internal", error.message || "Failed to fetch Shopify products.");
+    }
+  }
+);
+
+export const importShopifyProducts = onCall(
+  { timeoutSeconds: 30, memory: "256MiB", cors: true },
+  async (request) => {
+    if (!request.auth) {
+      throw new HttpsError("unauthenticated", "Authentication required.");
+    }
+
+    const userId = request.auth.uid;
+    const conn = await getShopifyConnection(userId);
+    if (!conn) {
+      throw new HttpsError("failed-precondition", "No Shopify store connected.");
+    }
+
+    const { shopifyProductIds } = request.data as { shopifyProductIds: string[] };
+    if (!shopifyProductIds || shopifyProductIds.length === 0) {
+      throw new HttpsError("invalid-argument", "shopifyProductIds is required.");
+    }
+
+    if (shopifyProductIds.length > 50) {
+      throw new HttpsError("invalid-argument", "Cannot import more than 50 products at once.");
+    }
+
+    let imported = 0;
+
+    for (const spId of shopifyProductIds) {
+      try {
+        const shopifyProduct = await fetchShopifyProduct(conn.shopDomain, conn.accessToken, spId);
+        const product = mapShopifyToProduct(shopifyProduct, userId);
+
+        // Preserve user-edited fields if the product already exists
+        const existingDoc = await getFirestore().collection("products").doc(product.id).get();
+        if (existingDoc.exists) {
+          const existing = existingDoc.data()!;
+          product.features = existing.features?.length ? existing.features : product.features;
+          product.complianceFiles = existing.complianceFiles?.length ? existing.complianceFiles : product.complianceFiles;
+        }
+
+        await setProductDoc(product as any);
+        imported++;
+      } catch (error: any) {
+        console.error(`Failed to import Shopify product ${spId}:`, error);
+      }
+    }
+
+    return { imported };
+  }
+);
+
+export const resyncShopifyProducts = onCall(
+  { timeoutSeconds: 60, memory: "256MiB", cors: true },
+  async (request) => {
+    if (!request.auth) {
+      throw new HttpsError("unauthenticated", "Authentication required.");
+    }
+
+    const userId = request.auth.uid;
+    const conn = await getShopifyConnection(userId);
+    if (!conn) {
+      throw new HttpsError("failed-precondition", "No Shopify store connected.");
+    }
+
+    const existingProducts = await getShopifyProductDocs(userId);
+    let synced = 0;
+    const failed: string[] = [];
+
+    for (const existing of existingProducts) {
+      if (!existing.shopifyProductId) {
+        failed.push(existing.id);
+        continue;
+      }
+
+      try {
+        const shopifyProduct = await fetchShopifyProduct(
+          conn.shopDomain,
+          conn.accessToken,
+          existing.shopifyProductId
+        );
+        const freshData = mapShopifyToProduct(shopifyProduct, userId);
+
+        // Preserve user-edited fields
+        freshData.features = existing.features?.length ? existing.features : freshData.features;
+        freshData.complianceFiles = existing.complianceFiles?.length ? existing.complianceFiles : freshData.complianceFiles;
+
+        await setProductDoc(freshData as any);
+        synced++;
+      } catch (error: any) {
+        console.error(`Failed to resync product ${existing.id}:`, error);
+        failed.push(existing.id);
+      }
+    }
+
+    return { synced, failed };
   }
 );

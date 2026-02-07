@@ -39,6 +39,14 @@ service cloud.firestore {
     match /generationJobLocks/{id} {
       allow read, write: if false;
     }
+    // Shopify connections: server-side only, no client access
+    match /shopifyConnections/{userId} {
+      allow read, write: if false;
+    }
+    // Shopify OAuth state tokens: server-side only, no client access
+    match /shopifyOAuthStates/{stateId} {
+      allow read, write: if false;
+    }
     match /{document=**} { allow read, write: if false; }
   }
 }
