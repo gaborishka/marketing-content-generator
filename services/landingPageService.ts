@@ -9,12 +9,12 @@ interface LandingPageResponse {
 }
 
 const generateLandingPageFn = httpsCallable<
-  { conversationHistory: { role: string; content: string }[]; currentHtml?: string },
+  { conversationHistory: { role: string; content: string; images?: string[] }[]; currentHtml?: string },
   LandingPageResponse
 >(functions, 'generateLandingPage');
 
 export async function generateLandingPage(
-  conversationHistory: { role: string; content: string }[],
+  conversationHistory: { role: string; content: string; images?: string[] }[],
   currentHtml?: string
 ): Promise<LandingPageResponse> {
   const result = await generateLandingPageFn({ conversationHistory, currentHtml });

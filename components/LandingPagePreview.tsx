@@ -99,6 +99,14 @@ export const LandingPagePreview: React.FC<LandingPagePreviewProps> = ({ html, is
               title="Landing page preview"
             />
           </div>
+        ) : isGenerating ? (
+          <div className="flex flex-col items-center justify-center h-full text-center">
+            <div className="w-16 h-16 rounded-full bg-blue-50 flex items-center justify-center mb-4">
+              <Loader2 className="animate-spin text-blue-500" size={28} />
+            </div>
+            <p className="text-slate-700 font-medium">Generating your landing page...</p>
+            <p className="text-sm text-slate-400 mt-1">This usually takes 15-30 seconds</p>
+          </div>
         ) : (
           <div className="flex flex-col items-center justify-center h-full text-center">
             <div className="w-16 h-16 rounded-full bg-slate-200 flex items-center justify-center mb-4">

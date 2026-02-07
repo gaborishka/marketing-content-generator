@@ -103,14 +103,17 @@ export const LandingPageGenerator: React.FC<LandingPageGeneratorProps> = ({ land
     }
   };
 
-  // Interview complete: compile answers and generate page
+  // Interview complete: compile answers, switch to chat, generate in preview
   const handleInterviewComplete = async (answers: { label: string; answer: string }[]) => {
-    setIsLoading(true);
-
     const preferencesText = answers.map((a) => `- ${a.label}: ${a.answer}`).join('\n');
     const compiledMessage = `${initialDescription}\n\nMy preferences:\n${preferencesText}`;
 
-    // Build conversation for Gemini: user description → model asked questions → user gave answers
+    // Switch to chat immediately — loader shows in the preview area
+    const userMsg: ChatMessage = { id: `msg-${Date.now()}`, role: 'user', content: compiledMessage, timestamp: Date.now() };
+    setMessages([userMsg]);
+    setPhase('chat');
+    setIsLoading(true);
+
     const conversationHistory = [
       { role: 'user', content: initialDescription },
       { role: 'assistant', content: 'I have a few questions to tailor the page to your needs.' },
@@ -120,8 +123,6 @@ export const LandingPageGenerator: React.FC<LandingPageGeneratorProps> = ({ land
     try {
       const response = await generateLandingPage(conversationHistory);
 
-      // For the stored chat messages, keep it clean: combined user msg + assistant response
-      const userMsg: ChatMessage = { id: `msg-${Date.now()}`, role: 'user', content: compiledMessage, timestamp: Date.now() };
       const assistantMsg: ChatMessage = {
         id: `msg-${Date.now()}-a`,
         role: 'assistant',
@@ -132,29 +133,30 @@ export const LandingPageGenerator: React.FC<LandingPageGeneratorProps> = ({ land
       setMessages(allMessages);
 
       if (response.html) setCurrentHtml(response.html);
-      setPhase('chat');
       saveProject(allMessages, response.html, initialDescription);
     } catch (error) {
       console.error('Generation error:', error);
-      // Fall back to chat with an error message
-      const userMsg: ChatMessage = { id: `msg-${Date.now()}`, role: 'user', content: compiledMessage, timestamp: Date.now() };
       const errorMsg: ChatMessage = { id: `msg-${Date.now()}-err`, role: 'assistant', content: 'Sorry, something went wrong. Please try again.', timestamp: Date.now() };
       setMessages([userMsg, errorMsg]);
-      setPhase('chat');
     } finally {
       setIsLoading(false);
     }
   };
 
-  // Chat refinement messages (after initial generation)
-  const handleSendMessage = async (text: string) => {
-    const userMsg: ChatMessage = { id: `msg-${Date.now()}`, role: 'user', content: text, timestamp: Date.now() };
+  // Chat refinement messages (after initial generation) — supports image attachments
+  const handleSendMessage = async (text: string, images?: string[]) => {
+    const userMsg: ChatMessage = { id: `msg-${Date.now()}`, role: 'user', content: text, images, timestamp: Date.now() };
     const updatedMessages = [...messages, userMsg];
     setMessages(updatedMessages);
     setIsLoading(true);
 
     try {
-      const history = updatedMessages.map((m) => ({ role: m.role, content: m.content }));
+      // Build history: only include images on the last user message to keep payload small
+      const history = updatedMessages.map((m, i) => ({
+        role: m.role,
+        content: m.content,
+        ...(i === updatedMessages.length - 1 && m.images?.length ? { images: m.images } : {}),
+      }));
       const response = await generateLandingPage(history, currentHtml || undefined);
 
       const assistantMsg: ChatMessage = { id: `msg-${Date.now()}-a`, role: 'assistant', content: response.message, timestamp: Date.now() };
@@ -181,10 +183,13 @@ export const LandingPageGenerator: React.FC<LandingPageGeneratorProps> = ({ land
       ? activeProject.title
       : msgs[0]?.content.slice(0, 50) || 'Untitled Page';
 
+    // Strip images from persisted messages (too large for Firestore)
+    const persistableMessages = msgs.map(({ images, ...rest }) => rest);
+
     const savedProject: LandingPageProject = {
       ...activeProject,
       title: activeProject.conversationHistory.length === 0 ? title : activeProject.title,
-      conversationHistory: msgs,
+      conversationHistory: persistableMessages,
       currentHtml: html,
       updatedAt: Date.now(),
     };
@@ -263,9 +268,9 @@ export const LandingPageGenerator: React.FC<LandingPageGeneratorProps> = ({ land
         {renderLeftPanel()}
       </div>
 
-      {/* Right side: preview */}
+      {/* Right side: preview — isLoading drives the generating state */}
       <div className="flex-1 min-w-0">
-        <LandingPagePreview html={currentHtml} isGenerating={isLoading && !!currentHtml} />
+        <LandingPagePreview html={currentHtml} isGenerating={isLoading} />
       </div>
     </div>
   );

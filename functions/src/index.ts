@@ -281,7 +281,7 @@ export const generateVideo = onCall(
 // ── generateLandingPage ──────────────────────────────────────────────────────
 
 interface GenerateLandingPageInput {
-  conversationHistory: { role: string; content: string }[];
+  conversationHistory: { role: string; content: string; images?: string[] }[];
   currentHtml?: string;
 }
 
@@ -299,10 +299,27 @@ export const generateLandingPage = onCall(
 
     const ai = getAiClient();
 
-    const contents = conversationHistory.map((msg) => ({
-      role: msg.role === "assistant" ? "model" : "user",
-      parts: [{ text: msg.content }],
-    }));
+    const contents = conversationHistory.map((msg) => {
+      const parts: any[] = [];
+      if (msg.content) {
+        parts.push({ text: msg.content });
+      }
+      if (msg.images && msg.images.length > 0) {
+        for (const dataUrl of msg.images) {
+          const match = dataUrl.match(/^data:(image\/[^;]+);base64,(.+)$/);
+          if (match) {
+            parts.push({ inlineData: { mimeType: match[1], data: match[2] } });
+          }
+        }
+      }
+      if (parts.length === 0) {
+        parts.push({ text: "" });
+      }
+      return {
+        role: msg.role === "assistant" ? "model" : "user",
+        parts,
+      };
+    });
 
     try {
       const response = await ai.models.generateContent({
