@@ -35,80 +35,102 @@ export async function runComplianceCheck(
     const results: ComplianceResult[] = [];
 
     for (const doc of contentDocs) {
-      const prompt = buildCompliancePrompt(
-        doc.text,
-        doc.channel,
-        doc.audience,
-        ruleText,
-        ruleName
-      );
-
-      const response = await ai.models.generateContent({
-        model: MODEL,
-        contents: prompt,
-        config: {
-          responseMimeType: "application/json",
-          maxOutputTokens: 2048,
-          responseSchema: COMPLIANCE_RESPONSE_SCHEMA,
-        },
-      });
-
-      const cleanText = (response.text || "{}")
-        .replace(/```json\n?|```/g, "")
-        .trim();
-
-      let raw: ComplianceRawResponse;
       try {
-        raw = JSON.parse(cleanText);
-      } catch {
-        // If parse fails for one item, mark it as needing review
+        const prompt = buildCompliancePrompt(
+          doc.text,
+          doc.channel,
+          doc.audience,
+          ruleText,
+          ruleName
+        );
+
+        const response = await ai.models.generateContent({
+          model: MODEL,
+          contents: prompt,
+          config: {
+            responseMimeType: "application/json",
+            maxOutputTokens: 2048,
+            responseSchema: COMPLIANCE_RESPONSE_SCHEMA,
+          },
+        });
+
+        const cleanText = (response.text || "{}")
+          .replace(/```json\n?|```/g, "")
+          .trim();
+
+        let raw: ComplianceRawResponse;
+        try {
+          raw = JSON.parse(cleanText);
+        } catch {
+          // If parse fails for one item, mark it as needing review
+          results.push({
+            contentId: doc.id,
+            score: 0,
+            pass: false,
+            feedback: "Failed to parse compliance evaluation response",
+            violations: ["Evaluation parse error"],
+          });
+
+          // Persist parse failure to Firestore so frontend shows accurate state
+          await updateContentDoc(doc.id, {
+            complianceScore: 0,
+            complianceDetails: {
+              score: 0,
+              violations: ["Evaluation parse error"],
+              suggestions: [],
+              retryAttempt,
+            },
+          });
+
+          continue;
+        }
+
+        const score = Math.max(0, Math.min(100, Math.round(raw.score || 0)));
+        const pass = score >= 80;
+
+        const result: ComplianceResult = {
+          contentId: doc.id,
+          score,
+          pass,
+          feedback: raw.feedback || "",
+          violations: raw.violations || [],
+          suggestedFix: raw.suggestedFix,
+        };
+
+        results.push(result);
+
+        // Write complianceDetails to the content doc
+        await updateContentDoc(doc.id, {
+          complianceScore: score,
+          complianceDetails: {
+            score,
+            violations: result.violations,
+            suggestions: result.suggestedFix ? [result.suggestedFix] : [],
+            suggestedFix: result.suggestedFix,
+            retryAttempt,
+          },
+        });
+      } catch (itemError: any) {
+        // Per-item API failure: mark as needing review rather than aborting the entire batch
+        console.error(`Compliance check failed for content ${doc.id}:`, itemError.message || itemError);
         results.push({
           contentId: doc.id,
           score: 0,
           pass: false,
-          feedback: "Failed to parse compliance evaluation response",
-          violations: ["Evaluation parse error"],
+          feedback: "Compliance evaluation failed for this item",
+          violations: ["Evaluation API error"],
         });
 
-        // Persist parse failure to Firestore so frontend shows accurate state
         await updateContentDoc(doc.id, {
           complianceScore: 0,
           complianceDetails: {
             score: 0,
-            violations: ["Evaluation parse error"],
+            violations: ["Evaluation API error"],
             suggestions: [],
             retryAttempt,
           },
         });
-
-        continue;
       }
-
-      const score = Math.max(0, Math.min(100, Math.round(raw.score)));
-      const pass = score >= 80;
-
-      const result: ComplianceResult = {
-        contentId: doc.id,
-        score,
-        pass,
-        feedback: raw.feedback || "",
-        violations: raw.violations || [],
-        suggestedFix: raw.suggestedFix,
-      };
-
-      results.push(result);
-
-      // Write complianceDetails to the content doc
-      await updateContentDoc(doc.id, {
-        complianceScore: score,
-        complianceDetails: {
-          score,
-          violations: result.violations,
-          suggestions: result.suggestedFix ? [result.suggestedFix] : [],
-          suggestedFix: result.suggestedFix,
-          retryAttempt,
-        },
-      });
     }
 
     return { success: true, data: results };

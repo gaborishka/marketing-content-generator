@@ -235,7 +235,7 @@ describe("runComplianceCheck", () => {
     expect(result.data![1].pass).toBe(true);
   });
 
-  it("returns error when Gemini API throws", async () => {
+  it("handles per-item API errors gracefully without aborting batch", async () => {
     mockGenerateContent.mockRejectedValue(new Error("Rate limit exceeded"));
 
     const result = await runComplianceCheck(
@@ -245,9 +245,15 @@ describe("runComplianceCheck", () => {
       0
     );
 
-    expect(result.success).toBe(false);
-    expect(result.error).toContain("Compliance check failed");
-    expect(result.error).toContain("Rate limit exceeded");
+    // Per-item API failures are caught — batch still succeeds with error results
+    expect(result.success).toBe(true);
+    expect(result.data).toHaveLength(2);
+    expect(result.data![0].score).toBe(0);
+    expect(result.data![0].pass).toBe(false);
+    expect(result.data![0].violations).toContain("Evaluation API error");
+    expect(result.data![1].score).toBe(0);
+    expect(result.data![1].pass).toBe(false);
+    expect(result.data![1].violations).toContain("Evaluation API error");
   });
 
   it("strips markdown code fences from response", async () => {

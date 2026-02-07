@@ -281,7 +281,7 @@ export const generateVideo = onCall(
 // Quick onCall trigger: validates input, creates a job doc, returns { jobId }.
 // The actual pipeline runs asynchronously via processGenerationJob below.
 
-import { createJobIfNoActive, updateJobDoc, clearJobLock } from "./utils/firestore";
+import { createJobIfNoActive, updateJobDoc } from "./utils/firestore";
 import { runOrchestrator } from "./agents/orchestrator";
 
 interface GenerateCampaignInput {
@@ -376,11 +376,7 @@ export const processGenerationJob = onDocumentCreated(
       } catch {
         console.error(`Failed to mark job ${jobId} as failed after unhandled error`);
       }
-      try {
-        await clearJobLock(campaignId, userId, jobId);
-      } catch {
-        console.error(`Failed to clear job lock for campaign ${campaignId} after unhandled error`);
-      }
+      // Note: clearJobLock is handled by the orchestrator's finally block
     }
   }
 );
