@@ -298,17 +298,43 @@ export const CampaignDetail: React.FC<CampaignDetailProps> = ({
         startX = maxX + 400;
       }
 
+      // Match generated content to placeholders by (channel, audience) to inherit positions.
+      // Track which placeholders have already been claimed so each is used at most once.
+      const placeholders = currentContentStore.filter(c => c.id.startsWith('placeholder-'));
+      const claimedPlaceholderIds = new Set<string>();
+
       const positioned = jobContent.map((item, idx) => {
-        // Check if this item already has a position in the local content store
-        const existing = currentContentStore.find(c => c.id === item.id);
-        // If this item already exists in local store, preserve its position
-        // (even if at 0,0 — that could be a deliberate user placement)
-        const hasLocalPosition = !!existing;
+        // First: check if this exact item already exists in local store (re-snapshot)
+        const existingById = currentContentStore.find(c => c.id === item.id);
+        if (existingById) {
+          return {
+            ...item,
+            x: existingById.x,
+            y: existingById.y,
+            width: existingById.width || item.width || 320,
+          };
+        }
+
+        // Second: match to an unclaimed placeholder by (channel, audience) tuple
+        const matchedPlaceholder = placeholders.find(
+          p => p.channel === item.channel && p.audience === item.audience && !claimedPlaceholderIds.has(p.id)
+        );
+        if (matchedPlaceholder) {
+          claimedPlaceholderIds.add(matchedPlaceholder.id);
+          return {
+            ...item,
+            x: matchedPlaceholder.x,
+            y: matchedPlaceholder.y,
+            width: matchedPlaceholder.width || item.width || 320,
+          };
+        }
+
+        // Fallback: assign a grid position for items with no matching placeholder
         return {
           ...item,
-          x: hasLocalPosition ? existing.x : startX + (Math.floor(idx / 2) * 340),
-          y: hasLocalPosition ? existing.y : 100 + ((idx % 2) * 450),
-          width: existing?.width || item.width || 320,
+          x: startX + (Math.floor(idx / 2) * 340),
+          y: 100 + ((idx % 2) * 450),
+          width: item.width || 320,
         };
       });
 
@@ -388,6 +414,10 @@ export const CampaignDetail: React.FC<CampaignDetailProps> = ({
     }
     if (placeholders.length > 0) {
       onUpdateContent([...contentStore, ...placeholders]);
+      // Pan the canvas to show the new placeholder cards
+      const avgX = placeholders.reduce((sum, p) => sum + p.x, 0) / placeholders.length + 160;
+      const avgY = placeholders.reduce((sum, p) => sum + p.y, 0) / placeholders.length + 200;
+      setCanvasFocusTarget({ x: avgX, y: avgY, timestamp: Date.now() });
     }
 
     try {
