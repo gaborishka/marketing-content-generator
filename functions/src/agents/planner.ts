@@ -69,7 +69,7 @@ export async function runPlanner(
       audience: c.audience,
     }));
 
-    // 6. Build channel x audience combinations, skip existing, cap at 6
+    // 6. Build channel x audience combinations, cap at 6
     const allCombinations: { channel: string; audience: string }[] = [];
     for (const channel of campaign.channels || []) {
       for (const audience of campaign.targetAudiences || []) {
@@ -77,24 +77,7 @@ export async function runPlanner(
       }
     }
 
-    // Filter out existing combinations
-    const newCombinations = allCombinations.filter(
-      (combo) =>
-        !existingCombinations.some(
-          (existing) =>
-            existing.channel === combo.channel &&
-            existing.audience === combo.audience
-        )
-    );
-
-    const cappedCombinations = newCombinations.slice(0, 6);
-
-    if (cappedCombinations.length === 0) {
-      return {
-        success: false,
-        error: "No new channel/audience combinations to generate",
-      };
-    }
+    const cappedCombinations = allCombinations.slice(0, 6);
 
     // 7. Return structured PlannerContext with minimal, focused context
     const context: PlannerContext = {

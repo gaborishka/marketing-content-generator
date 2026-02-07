@@ -139,7 +139,7 @@ describe("runPlanner", () => {
     expect(result.data!.complianceRule).toBeUndefined();
   });
 
-  it("deduplicates existing combinations", async () => {
+  it("allows regenerating existing combinations", async () => {
     mockGetContentForCampaign.mockResolvedValue([
       { channel: "Twitter", audience: "Gen Z" },
     ]);
@@ -147,9 +147,9 @@ describe("runPlanner", () => {
     const result = await runPlanner("camp-1", "user-1");
 
     expect(result.success).toBe(true);
-    // 4 total - 1 existing = 3 new combinations
-    expect(result.data!.combinations).toHaveLength(3);
-    expect(result.data!.combinations).not.toContainEqual({
+    // All 4 combinations returned even though one already exists
+    expect(result.data!.combinations).toHaveLength(4);
+    expect(result.data!.combinations).toContainEqual({
       channel: "Twitter",
       audience: "Gen Z",
     });
@@ -172,7 +172,7 @@ describe("runPlanner", () => {
     expect(result.data!.combinations).toHaveLength(6);
   });
 
-  it("returns error when all combinations already exist", async () => {
+  it("succeeds even when all combinations already exist", async () => {
     mockGetContentForCampaign.mockResolvedValue([
       { channel: "Twitter", audience: "Gen Z" },
       { channel: "Twitter", audience: "Millennials" },
@@ -182,8 +182,8 @@ describe("runPlanner", () => {
 
     const result = await runPlanner("camp-1", "user-1");
 
-    expect(result.success).toBe(false);
-    expect(result.error).toContain("No new channel/audience combinations");
+    expect(result.success).toBe(true);
+    expect(result.data!.combinations).toHaveLength(4);
   });
 
   it("handles firestore errors gracefully", async () => {
