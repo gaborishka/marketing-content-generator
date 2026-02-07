@@ -25,9 +25,12 @@ import {
   Pill,
   Building2,
   UserCircle,
-  ChevronDown
+  ChevronDown,
+  Film,
+  Trash2,
+  PlusCircle
 } from 'lucide-react';
-import { GeneratedContent, CHANNEL_FORMATS, getParentChannel } from '../types';
+import { GeneratedContent, Scene, CHANNEL_FORMATS, getParentChannel } from '../types';
 
 interface ContentCreationModalProps {
   campaignId: string;
@@ -102,9 +105,16 @@ export const ContentCreationModal: React.FC<ContentCreationModalProps> = ({
   const [selectedAudience, setSelectedAudience] = useState(existingAudiences[0] || 'General Public');
   const [isChannelDropdownOpen, setIsChannelDropdownOpen] = useState(false);
   const [isDragOver, setIsDragOver] = useState(false);
+  const [scenes, setScenes] = useState<Scene[]>([
+    { sceneNumber: 1, imagePrompt: '', voiceover: '' },
+    { sceneNumber: 2, imagePrompt: '', voiceover: '' },
+    { sceneNumber: 3, imagePrompt: '', voiceover: '' },
+  ]);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const dropZoneRef = useRef<HTMLDivElement>(null);
+
+  const isVideoStoryboard = getParentChannel(selectedChannel) === 'Video Storyboard';
 
   // Close on Escape
   useEffect(() => {
@@ -146,25 +156,58 @@ export const ContentCreationModal: React.FC<ContentCreationModalProps> = ({
     setIsDragOver(false);
   };
 
+  const handleUpdateScene = (index: number, field: 'imagePrompt' | 'voiceover', value: string) => {
+    setScenes(prev => prev.map((s, i) => i === index ? { ...s, [field]: value } : s));
+  };
+
+  const handleAddScene = () => {
+    setScenes(prev => [...prev, { sceneNumber: prev.length + 1, imagePrompt: '', voiceover: '' }]);
+  };
+
+  const handleRemoveScene = (index: number) => {
+    setScenes(prev => prev.filter((_, i) => i !== index).map((s, i) => ({ ...s, sceneNumber: i + 1 })));
+  };
+
   const handleCreate = () => {
-    if (!text.trim() && !imageDataUrl) return;
+    if (isVideoStoryboard) {
+      const validScenes = scenes.filter(s => s.voiceover.trim() || s.imagePrompt.trim());
+      if (validScenes.length === 0) return;
 
-    const newContent: GeneratedContent = {
-      id: `manual-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-      campaignId,
-      channel: selectedChannel,
-      audience: selectedAudience,
-      text: text.trim(),
-      imageUrl: imageDataUrl || undefined,
-      complianceScore: 0,
-      status: 'draft',
-      riskLevel: 'low',
-      x: canvasPosition.x,
-      y: canvasPosition.y,
-      width: 320,
-    };
+      const newContent: GeneratedContent = {
+        id: `manual-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        campaignId,
+        channel: selectedChannel,
+        audience: selectedAudience,
+        text: text.trim() || validScenes.map(s => s.voiceover).join(' | '),
+        complianceScore: 0,
+        status: 'draft',
+        riskLevel: 'low',
+        x: canvasPosition.x,
+        y: canvasPosition.y,
+        width: 320,
+        storyboard: validScenes,
+        videoStatus: 'idle',
+      };
+      onCreate(newContent);
+    } else {
+      if (!text.trim() && !imageDataUrl) return;
 
-    onCreate(newContent);
+      const newContent: GeneratedContent = {
+        id: `manual-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        campaignId,
+        channel: selectedChannel,
+        audience: selectedAudience,
+        text: text.trim(),
+        imageUrl: imageDataUrl || undefined,
+        complianceScore: 0,
+        status: 'draft',
+        riskLevel: 'low',
+        x: canvasPosition.x,
+        y: canvasPosition.y,
+        width: 320,
+      };
+      onCreate(newContent);
+    }
     onClose();
   };
 
@@ -172,7 +215,9 @@ export const ContentCreationModal: React.FC<ContentCreationModalProps> = ({
   const channelColor = CHANNEL_COLORS[parentChannel] || { text: 'text-slate-600', bg: 'bg-slate-50', border: 'border-slate-200' };
   const ChannelIcon = CHANNEL_ICONS[parentChannel] || AlignLeft;
 
-  const canCreate = text.trim().length > 0 || !!imageDataUrl;
+  const canCreate = isVideoStoryboard
+    ? scenes.some(s => s.voiceover.trim() || s.imagePrompt.trim())
+    : (text.trim().length > 0 || !!imageDataUrl);
 
   // Group channels: prioritize those already in the campaign, then all others
   const campaignFormats = ALL_SUBFORMATS.filter(sf => existingChannels.includes(sf.format));
@@ -312,75 +357,158 @@ export const ContentCreationModal: React.FC<ContentCreationModalProps> = ({
             </div>
           </div>
 
-          {/* Text Content */}
-          <div>
-            <div className="flex items-center space-x-2 mb-2">
-              <Type size={14} className="text-slate-400" />
-              <label className="text-xs font-semibold text-slate-500 uppercase">Content Text</label>
-            </div>
-            <textarea
-              value={text}
-              onChange={(e) => setText(e.target.value)}
-              rows={6}
-              autoFocus={!initialText && !initialImageDataUrl}
-              className="w-full text-sm text-slate-700 bg-slate-50 border border-slate-200 rounded-xl p-4 focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none resize-none transition-all leading-relaxed"
-              placeholder="Type or paste your content here..."
-            />
-          </div>
-
-          {/* Image Upload */}
-          <div>
-            <div className="flex items-center justify-between mb-2">
-              <div className="flex items-center space-x-2">
-                <ImageIcon size={14} className="text-slate-400" />
-                <label className="text-xs font-semibold text-slate-500 uppercase">Image (optional)</label>
-              </div>
-              {imageDataUrl && (
-                <button
-                  onClick={() => setImageDataUrl('')}
-                  className="text-xs text-red-500 hover:text-red-700 font-medium"
-                >
-                  Remove
-                </button>
-              )}
-            </div>
-
-            {imageDataUrl ? (
-              <div className="rounded-xl overflow-hidden border border-slate-200 bg-slate-50">
-                <img
-                  src={imageDataUrl}
-                  alt="Uploaded content"
-                  className="w-full max-h-48 object-cover"
+          {isVideoStoryboard ? (
+            /* Video Storyboard Scenes */
+            <>
+              {/* Optional description */}
+              <div>
+                <div className="flex items-center space-x-2 mb-2">
+                  <Film size={14} className="text-violet-500" />
+                  <label className="text-xs font-semibold text-slate-500 uppercase">Storyboard Description (optional)</label>
+                </div>
+                <textarea
+                  value={text}
+                  onChange={(e) => setText(e.target.value)}
+                  rows={2}
+                  className="w-full text-sm text-slate-700 bg-slate-50 border border-slate-200 rounded-xl p-3 focus:ring-2 focus:ring-violet-500 focus:border-transparent outline-none resize-none transition-all leading-relaxed"
+                  placeholder="Brief description of this storyboard..."
                 />
               </div>
-            ) : (
-              <div
-                ref={dropZoneRef}
-                onDrop={handleDrop}
-                onDragOver={handleDragOver}
-                onDragLeave={handleDragLeave}
-                onClick={() => fileInputRef.current?.click()}
-                className={`border-2 border-dashed rounded-xl p-6 text-center cursor-pointer transition-all ${
-                  isDragOver
-                    ? 'border-blue-400 bg-blue-50'
-                    : 'border-slate-200 bg-slate-50 hover:border-slate-300 hover:bg-slate-100'
-                }`}
-              >
-                <Upload size={24} className={`mx-auto mb-2 ${isDragOver ? 'text-blue-500' : 'text-slate-400'}`} />
-                <p className="text-xs text-slate-500">
-                  <span className="font-semibold text-blue-600">Click to upload</span> or drag & drop
-                </p>
-                <p className="text-[10px] text-slate-400 mt-1">PNG, JPG, GIF, WebP</p>
+
+              {/* Scene List */}
+              <div>
+                <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center space-x-2">
+                    <Film size={14} className="text-violet-500" />
+                    <label className="text-xs font-semibold text-slate-500 uppercase">Scenes</label>
+                    <span className="text-[10px] text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded-full">{scenes.length}</span>
+                  </div>
+                  <button
+                    onClick={handleAddScene}
+                    className="flex items-center space-x-1 text-xs text-violet-600 hover:text-violet-700 font-medium"
+                  >
+                    <PlusCircle size={13} />
+                    <span>Add Scene</span>
+                  </button>
+                </div>
+
+                <div className="space-y-3">
+                  {scenes.map((scene, index) => (
+                    <div key={index} className="bg-slate-50 border border-slate-200 rounded-xl p-3 relative group">
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-xs font-bold text-violet-600 bg-violet-50 px-2 py-0.5 rounded-full">
+                          Scene {scene.sceneNumber}
+                        </span>
+                        {scenes.length > 1 && (
+                          <button
+                            onClick={() => handleRemoveScene(index)}
+                            className="text-slate-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity"
+                          >
+                            <Trash2 size={13} />
+                          </button>
+                        )}
+                      </div>
+                      <div className="space-y-2">
+                        <div>
+                          <label className="text-[10px] font-semibold text-slate-400 uppercase block mb-1">Voiceover</label>
+                          <textarea
+                            value={scene.voiceover}
+                            onChange={(e) => handleUpdateScene(index, 'voiceover', e.target.value)}
+                            rows={2}
+                            className="w-full text-xs text-slate-700 bg-white border border-slate-200 rounded-lg p-2.5 focus:ring-2 focus:ring-violet-500 focus:border-transparent outline-none resize-none transition-all"
+                            placeholder="Narration for this scene..."
+                          />
+                        </div>
+                        <div>
+                          <label className="text-[10px] font-semibold text-slate-400 uppercase block mb-1">Image Prompt</label>
+                          <input
+                            type="text"
+                            value={scene.imagePrompt}
+                            onChange={(e) => handleUpdateScene(index, 'imagePrompt', e.target.value)}
+                            className="w-full text-xs text-slate-700 bg-white border border-slate-200 rounded-lg p-2.5 focus:ring-2 focus:ring-violet-500 focus:border-transparent outline-none transition-all"
+                            placeholder="Describe the visual for this scene..."
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
               </div>
-            )}
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept="image/*"
-              className="hidden"
-              onChange={handleFileSelect}
-            />
-          </div>
+            </>
+          ) : (
+            /* Regular Content: Text + Image */
+            <>
+              {/* Text Content */}
+              <div>
+                <div className="flex items-center space-x-2 mb-2">
+                  <Type size={14} className="text-slate-400" />
+                  <label className="text-xs font-semibold text-slate-500 uppercase">Content Text</label>
+                </div>
+                <textarea
+                  value={text}
+                  onChange={(e) => setText(e.target.value)}
+                  rows={6}
+                  autoFocus={!initialText && !initialImageDataUrl}
+                  className="w-full text-sm text-slate-700 bg-slate-50 border border-slate-200 rounded-xl p-4 focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none resize-none transition-all leading-relaxed"
+                  placeholder="Type or paste your content here..."
+                />
+              </div>
+
+              {/* Image Upload */}
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center space-x-2">
+                    <ImageIcon size={14} className="text-slate-400" />
+                    <label className="text-xs font-semibold text-slate-500 uppercase">Image (optional)</label>
+                  </div>
+                  {imageDataUrl && (
+                    <button
+                      onClick={() => setImageDataUrl('')}
+                      className="text-xs text-red-500 hover:text-red-700 font-medium"
+                    >
+                      Remove
+                    </button>
+                  )}
+                </div>
+
+                {imageDataUrl ? (
+                  <div className="rounded-xl overflow-hidden border border-slate-200 bg-slate-50">
+                    <img
+                      src={imageDataUrl}
+                      alt="Uploaded content"
+                      className="w-full max-h-48 object-cover"
+                    />
+                  </div>
+                ) : (
+                  <div
+                    ref={dropZoneRef}
+                    onDrop={handleDrop}
+                    onDragOver={handleDragOver}
+                    onDragLeave={handleDragLeave}
+                    onClick={() => fileInputRef.current?.click()}
+                    className={`border-2 border-dashed rounded-xl p-6 text-center cursor-pointer transition-all ${
+                      isDragOver
+                        ? 'border-blue-400 bg-blue-50'
+                        : 'border-slate-200 bg-slate-50 hover:border-slate-300 hover:bg-slate-100'
+                    }`}
+                  >
+                    <Upload size={24} className={`mx-auto mb-2 ${isDragOver ? 'text-blue-500' : 'text-slate-400'}`} />
+                    <p className="text-xs text-slate-500">
+                      <span className="font-semibold text-blue-600">Click to upload</span> or drag & drop
+                    </p>
+                    <p className="text-[10px] text-slate-400 mt-1">PNG, JPG, GIF, WebP</p>
+                  </div>
+                )}
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={handleFileSelect}
+                />
+              </div>
+            </>
+          )}
         </div>
 
         {/* Footer */}
