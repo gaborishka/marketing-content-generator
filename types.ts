@@ -28,6 +28,26 @@ export interface ComplianceRule {
   updatedAt: string;
 }
 
+// Brands
+export interface BrandColor {
+  label: string;
+  hex: string;
+}
+
+export interface Brand {
+  id: string;
+  name: string;
+  description: string;
+  logoUrl?: string;
+  colors: BrandColor[];
+  voiceTone: string;       // e.g. "Professional", "Playful", "Authoritative"
+  voiceStyle: string;      // free-form voice/style guidelines
+  tagline?: string;
+  guidelines?: string;     // additional brand guidelines
+  createdAt: string;
+  updatedAt: string;
+}
+
 // Campaigns
 export type CampaignStatus = 'draft' | 'generating' | 'review' | 'approved' | 'published' | 'paused' | 'completed';
 

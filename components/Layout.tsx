@@ -1,13 +1,14 @@
 import React, { useState } from 'react';
-import { 
-  LayoutDashboard, 
-  Megaphone, 
+import {
+  LayoutDashboard,
+  Megaphone,
   Package,
+  Palette,
   ShieldCheck,
   Settings,
-  Menu, 
-  Bell, 
-  User, 
+  Menu,
+  Bell,
+  User,
   LogOut,
   Sparkles
 } from 'lucide-react';
@@ -71,6 +72,12 @@ export const Layout: React.FC<LayoutProps> = ({ children, onSignOut, userName })
             label="Products"
             path="/products"
             active={location.pathname.startsWith('/products')}
+          />
+          <SidebarItem
+            icon={Palette}
+            label="Brands"
+            path="/brands"
+            active={location.pathname.startsWith('/brands')}
           />
           <SidebarItem
             icon={ShieldCheck}
