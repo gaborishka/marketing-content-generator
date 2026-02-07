@@ -18,6 +18,101 @@ const SUGGESTION_CHIPS = [
 const MAX_IMAGES = 4;
 const MAX_DIMENSION = 1024;
 
+function renderMarkdown(text: string): string {
+  // Extract code blocks first to protect them from other transformations
+  const codeBlocks: string[] = [];
+  let processed = text.replace(/```(\w*)\n([\s\S]*?)```/g, (_, lang, code) => {
+    const idx = codeBlocks.length;
+    codeBlocks.push(
+      `<pre style="background:#1e293b;color:#e2e8f0;border-radius:6px;padding:10px 12px;margin:6px 0;overflow-x:auto;font-size:12px;line-height:1.5"><code>${code
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').trimEnd()}</code></pre>`
+    );
+    return `\x00CB${idx}\x00`;
+  });
+
+  // Escape HTML in remaining text
+  processed = processed.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+  // Inline code
+  processed = processed.replace(/`([^`\n]+)`/g,
+    '<code style="background:#f1f5f9;color:#334155;padding:1px 5px;border-radius:4px;font-size:12px;font-family:monospace">$1</code>');
+
+  // Bold
+  processed = processed.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+
+  // Italic (single *, not preceded/followed by *)
+  processed = processed.replace(/(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)/g, '<em>$1</em>');
+
+  // Process lines for block elements
+  const lines = processed.split('\n');
+  let html = '';
+  let inList: 'ol' | 'ul' | null = null;
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+
+    // Code block placeholder — emit directly
+    const cbMatch = trimmed.match(/^\x00CB(\d+)\x00$/);
+    if (cbMatch) {
+      if (inList) { html += inList === 'ol' ? '</ol>' : '</ul>'; inList = null; }
+      html += codeBlocks[+cbMatch[1]];
+      continue;
+    }
+
+    // Headings
+    if (trimmed.startsWith('### ')) {
+      if (inList) { html += inList === 'ol' ? '</ol>' : '</ul>'; inList = null; }
+      html += `<p style="font-weight:600;margin:8px 0 2px">${trimmed.slice(4)}</p>`;
+      continue;
+    }
+    if (trimmed.startsWith('## ')) {
+      if (inList) { html += inList === 'ol' ? '</ol>' : '</ul>'; inList = null; }
+      html += `<p style="font-weight:600;margin:8px 0 2px">${trimmed.slice(3)}</p>`;
+      continue;
+    }
+
+    // Numbered list
+    const numMatch = trimmed.match(/^(\d+)\.\s+(.+)$/);
+    if (numMatch) {
+      if (inList !== 'ol') {
+        if (inList) html += '</ul>';
+        html += '<ol style="list-style:decimal;padding-left:20px;margin:4px 0">';
+        inList = 'ol';
+      }
+      html += `<li style="margin:2px 0">${numMatch[2]}</li>`;
+      continue;
+    }
+
+    // Bullet list
+    const bulletMatch = trimmed.match(/^[-•*]\s+(.+)$/);
+    if (bulletMatch && !trimmed.match(/^\*[^*]+\*$/)) {
+      if (inList !== 'ul') {
+        if (inList) html += '</ol>';
+        html += '<ul style="list-style:disc;padding-left:20px;margin:4px 0">';
+        inList = 'ul';
+      }
+      html += `<li style="margin:2px 0">${bulletMatch[1]}</li>`;
+      continue;
+    }
+
+    // Close open list on non-list line
+    if (inList) { html += inList === 'ol' ? '</ol>' : '</ul>'; inList = null; }
+
+    // Empty line
+    if (trimmed === '') {
+      html += '<div style="height:6px"></div>';
+      continue;
+    }
+
+    // Regular text
+    html += `<p style="margin:2px 0">${trimmed}</p>`;
+  }
+
+  if (inList) html += inList === 'ol' ? '</ol>' : '</ul>';
+
+  return html;
+}
+
 function resizeImage(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -157,7 +252,11 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ messages, onSendMessage, i
                       ))}
                     </div>
                   )}
-                  <span className="whitespace-pre-wrap">{msg.content}</span>
+                  {msg.role === 'assistant' ? (
+                    <div className="markdown-content [&>p]:leading-relaxed [&>ol]:leading-relaxed [&>ul]:leading-relaxed" dangerouslySetInnerHTML={{ __html: renderMarkdown(msg.content) }} />
+                  ) : (
+                    <span className="whitespace-pre-wrap">{msg.content}</span>
+                  )}
                 </div>
               </div>
             ))}
