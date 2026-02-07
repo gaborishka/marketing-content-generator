@@ -42,7 +42,6 @@ import {
   getContentForCampaign,
   writeContentDoc,
   updateContentDoc,
-  createJobDoc,
   updateJobDoc,
 } from "../utils/firestore";
 
@@ -112,31 +111,6 @@ describe("Firestore Helpers", () => {
       };
       await writeContentDoc(content);
       expect(mockSet).toHaveBeenCalledWith(content);
-    });
-  });
-
-  describe("createJobDoc", () => {
-    it("creates job doc with server timestamps", async () => {
-      await createJobDoc("job-1", {
-        userId: "u1",
-        campaignId: "camp1",
-        status: "pending",
-        progress: 0,
-        phase: "Initializing...",
-        contentIds: [],
-        itemsCompleted: 0,
-        itemsTotal: 0,
-        retryCount: 0,
-      });
-      expect(mockSet).toHaveBeenCalledWith(
-        expect.objectContaining({
-          userId: "u1",
-          campaignId: "camp1",
-          status: "pending",
-          createdAt: "SERVER_TIMESTAMP",
-          updatedAt: "SERVER_TIMESTAMP",
-        })
-      );
     });
   });
 

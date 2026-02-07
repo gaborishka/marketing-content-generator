@@ -372,7 +372,7 @@ export const processGenerationJob = onDocumentCreated(
     } catch (error: any) {
       console.error(`Unhandled pipeline error for job ${jobId}:`, error);
       try {
-        await updateJobDoc(jobId, { status: "failed", phase: "Failed", error: error.message || "Unexpected pipeline error" });
+        await updateJobDoc(jobId, { status: "failed", phase: "Failed", error: "Content generation failed. Please try again." });
       } catch {
         console.error(`Failed to mark job ${jobId} as failed after unhandled error`);
       }

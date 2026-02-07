@@ -219,8 +219,10 @@ describe("runOrchestrator", () => {
     const result = await runOrchestrator(baseInput);
 
     expect(result.success).toBe(false);
+    // Return value keeps raw error for server-side logging
     expect(result.error).toBe("Firestore connection lost");
-    expect(mockFail).toHaveBeenCalledWith("Firestore connection lost");
+    // But Firestore job doc gets a sanitized message
+    expect(mockFail).toHaveBeenCalledWith("Content generation failed. Please try again.");
   });
 
   it("fails gracefully when timeout is already expired", async () => {
@@ -753,8 +755,9 @@ describe("runOrchestrator - error recovery", () => {
 
     expect(result.success).toBe(false);
     expect(result.error).toContain("429 Resource exhausted");
+    // Error written to Firestore is sanitized (no internal details leak to client)
     expect(mockFail).toHaveBeenCalledWith(
-      expect.stringContaining("429 Resource exhausted")
+      "Content generation failed. Please try again."
     );
     expect(mockComplete).not.toHaveBeenCalled();
   });
@@ -767,9 +770,11 @@ describe("runOrchestrator - error recovery", () => {
     const result = await runOrchestrator(baseInput);
 
     expect(result.success).toBe(false);
+    // Return value keeps raw error for server-side logging
     expect(result.error).toContain("PERMISSION_DENIED");
+    // But Firestore job doc gets a sanitized message
     expect(mockFail).toHaveBeenCalledWith(
-      expect.stringContaining("PERMISSION_DENIED")
+      "Content generation failed. Please try again."
     );
   });
 });

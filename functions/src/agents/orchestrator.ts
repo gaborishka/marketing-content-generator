@@ -216,14 +216,18 @@ export async function runOrchestrator(
 
     return { success: true, contentIds };
   } catch (error: any) {
-    const message = error.message || String(error);
+    const rawMessage = error.message || String(error);
+    // Log full error server-side, but write a sanitized version to Firestore
+    // (the job doc is readable by the client via security rules)
+    const userMessage = "Content generation failed. Please try again.";
+    console.error(`Orchestrator error for job ${jobId}:`, rawMessage);
     try {
-      await progress.fail(message);
+      await progress.fail(userMessage);
     } catch {
       // Progress write failed — log but don't mask the original error
-      console.error("Failed to write error status to job doc:", message);
+      console.error("Failed to write error status to job doc:", rawMessage);
     }
-    return { success: false, contentIds: [], error: message };
+    return { success: false, contentIds: [], error: rawMessage };
   } finally {
     // Always release the job lock so the user can start a new generation.
     // Only clears if this job still owns the lock (prevents clearing a newer job's lock).

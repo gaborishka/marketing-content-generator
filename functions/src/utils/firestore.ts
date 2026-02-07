@@ -151,20 +151,6 @@ export async function updateContentDoc(
   await db().collection("content").doc(contentId).update(fields);
 }
 
-export async function createJobDoc(
-  jobId: string,
-  data: Omit<JobStatus, "createdAt" | "updatedAt">
-): Promise<void> {
-  await db()
-    .collection("generationJobs")
-    .doc(jobId)
-    .set({
-      ...data,
-      createdAt: FieldValue.serverTimestamp(),
-      updatedAt: FieldValue.serverTimestamp(),
-    });
-}
-
 export async function updateJobDoc(
   jobId: string,
   fields: Partial<JobStatus>

@@ -291,7 +291,9 @@ export const CampaignDetail: React.FC<CampaignDetailProps> = ({
       const positioned = jobContent.map((item, idx) => {
         // Check if this item already has a position in the local content store
         const existing = currentContentStore.find(c => c.id === item.id);
-        const hasLocalPosition = existing && (existing.x !== 0 || existing.y !== 0);
+        // If this item already exists in local store, preserve its position
+        // (even if at 0,0 — that could be a deliberate user placement)
+        const hasLocalPosition = !!existing;
         return {
           ...item,
           x: hasLocalPosition ? existing.x : startX + (Math.floor(idx / 2) * 340),
@@ -336,7 +338,7 @@ export const CampaignDetail: React.FC<CampaignDetailProps> = ({
   };
 
   const handleGenerateMore = async () => {
-    if (!campaign) return;
+    if (!campaign || isGenerating) return;
 
     setIsGenerating(true);
     setStatusMessage(null);
