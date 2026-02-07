@@ -169,8 +169,8 @@ describe("generateText", () => {
 
     const result = await generateText(ctx, "camp-1", "user-1", "job-1");
 
-    expect(result.success).toBe(true);
-    expect(result.data).toHaveLength(0);
+    expect(result.success).toBe(false);
+    expect(result.error).toBe("Gemini returned empty content array");
   });
 });
 

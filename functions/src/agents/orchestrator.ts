@@ -21,6 +21,7 @@
 
 import { ProgressWriter } from "../utils/progress";
 import { TimeoutBudget } from "../utils/timeout";
+import { clearJobLock } from "../utils/firestore";
 import { runPlanner } from "./planner";
 import { generateText, regenerateText } from "./generator";
 import { runComplianceCheck } from "./compliance";
@@ -223,5 +224,13 @@ export async function runOrchestrator(
       console.error("Failed to write error status to job doc:", message);
     }
     return { success: false, contentIds: [], error: message };
+  } finally {
+    // Always release the job lock so the user can start a new generation.
+    // Only clears if this job still owns the lock (prevents clearing a newer job's lock).
+    try {
+      await clearJobLock(campaignId, userId, jobId);
+    } catch {
+      console.error(`Failed to clear job lock for campaign ${campaignId}`);
+    }
   }
 }

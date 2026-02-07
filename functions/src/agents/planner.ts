@@ -24,11 +24,11 @@ export async function runPlanner(
       return { success: false, error: "Campaign does not belong to user" };
     }
 
-    // 2. Fetch primary product
+    // 2. Fetch primary product (verify userId ownership)
     let primaryProduct: PlannerContext["primaryProduct"];
     if (campaign.primaryProductId) {
       const product = await getProduct(campaign.primaryProductId);
-      if (product) {
+      if (product && product.userId === userId) {
         primaryProduct = {
           name: product.name,
           brand: product.brand,
@@ -39,20 +39,22 @@ export async function runPlanner(
       }
     }
 
-    // 3. Fetch secondary products
+    // 3. Fetch secondary products (filter to user-owned only)
     const secondaryProductDocs = await getProducts(
       campaign.secondaryProductIds || []
     );
-    const secondaryProducts = secondaryProductDocs.map((p) => ({
-      name: p.name,
-      brand: p.brand,
-    }));
+    const secondaryProducts = secondaryProductDocs
+      .filter((p) => p.userId === userId)
+      .map((p) => ({
+        name: p.name,
+        brand: p.brand,
+      }));
 
-    // 4. Fetch compliance rule (if set)
+    // 4. Fetch compliance rule (if set, verify userId ownership)
     let complianceRule: PlannerContext["complianceRule"];
     if (campaign.complianceRuleId) {
       const rule = await getComplianceRule(campaign.complianceRuleId);
-      if (rule) {
+      if (rule && rule.userId === userId) {
         complianceRule = {
           name: rule.name,
           ruleText: rule.ruleText,

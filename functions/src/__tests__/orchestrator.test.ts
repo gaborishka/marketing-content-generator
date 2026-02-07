@@ -42,6 +42,11 @@ vi.mock("../agents/assetManager", () => ({
   runAssetManager: (...args: any[]) => mockRunAssetManager(...args),
 }));
 
+const mockClearJobLock = vi.fn().mockResolvedValue(undefined);
+vi.mock("../utils/firestore", () => ({
+  clearJobLock: (...args: any[]) => mockClearJobLock(...args),
+}));
+
 import { runOrchestrator, OrchestratorInput } from "../agents/orchestrator";
 import { PlannerContext, ContentDoc } from "../types/pipeline";
 
@@ -264,6 +269,34 @@ describe("runOrchestrator", () => {
 
     expect(result.success).toBe(false);
     expect(result.error).toBe("Original error");
+  });
+
+  it("clears job lock on successful completion", async () => {
+    mockRunPlanner.mockResolvedValue({ success: true, data: plannerContext });
+    mockGenerateText.mockResolvedValue({ success: true, data: contentDocs });
+
+    await runOrchestrator(baseInput);
+
+    expect(mockClearJobLock).toHaveBeenCalledWith("camp-1", "user-1", "job-1");
+  });
+
+  it("clears job lock on failure", async () => {
+    mockRunPlanner.mockRejectedValue(new Error("Planner exploded"));
+
+    await runOrchestrator(baseInput);
+
+    expect(mockClearJobLock).toHaveBeenCalledWith("camp-1", "user-1", "job-1");
+  });
+
+  it("does not throw when clearJobLock fails", async () => {
+    mockRunPlanner.mockResolvedValue({ success: true, data: plannerContext });
+    mockGenerateText.mockResolvedValue({ success: true, data: contentDocs });
+    mockClearJobLock.mockRejectedValue(new Error("Lock clear failed"));
+
+    const result = await runOrchestrator(baseInput);
+
+    // Should still succeed — lock clear failure is non-blocking
+    expect(result.success).toBe(true);
   });
 });
 

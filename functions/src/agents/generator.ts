@@ -65,6 +65,10 @@ export async function generateText(
       return { success: false, error: "Gemini response is not an array" };
     }
 
+    if (rawData.length === 0) {
+      return { success: false, error: "Gemini returned empty content array" };
+    }
+
     // Write content docs to Firestore
     const contentDocs: ContentDoc[] = [];
     for (let i = 0; i < rawData.length; i++) {

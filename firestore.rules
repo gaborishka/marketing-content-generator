@@ -35,6 +35,10 @@ service cloud.firestore {
       allow read: if request.auth != null && resource.data.userId == request.auth.uid;
       allow create, update, delete: if false;
     }
+    // Job locks: server-side only, no client access
+    match /generationJobLocks/{id} {
+      allow read, write: if false;
+    }
     match /{document=**} { allow read, write: if false; }
   }
 }

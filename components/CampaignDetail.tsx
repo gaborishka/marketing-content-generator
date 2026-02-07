@@ -278,20 +278,27 @@ export const CampaignDetail: React.FC<CampaignDetailProps> = ({
       const currentContentStore = contentStoreRef.current;
       const currentCampaign = campaignRef.current;
 
-      // Assign canvas positions to new items that don't have them yet
-      const existingContent = currentContentStore.filter(c => c.campaignId === currentCampaign?.id);
+      // Assign canvas positions to new items that don't have them yet.
+      // Exclude current job items from startX calculation to prevent drift on re-snapshots.
+      const currentJobIds = new Set(jobContent.map(c => c.id));
+      const existingContent = currentContentStore.filter(c => c.campaignId === currentCampaign?.id && !currentJobIds.has(c.id));
       let startX = 50;
       if (existingContent.length > 0) {
         const maxX = Math.max(...existingContent.map(c => c.x));
         startX = maxX + 400;
       }
 
-      const positioned = jobContent.map((item, idx) => ({
-        ...item,
-        x: item.x || startX + (Math.floor(idx / 2) * 340),
-        y: item.y || 100 + ((idx % 2) * 450),
-        width: item.width || 320,
-      }));
+      const positioned = jobContent.map((item, idx) => {
+        // Check if this item already has a position in the local content store
+        const existing = currentContentStore.find(c => c.id === item.id);
+        const hasLocalPosition = existing && (existing.x !== 0 || existing.y !== 0);
+        return {
+          ...item,
+          x: hasLocalPosition ? existing.x : startX + (Math.floor(idx / 2) * 340),
+          y: hasLocalPosition ? existing.y : 100 + ((idx % 2) * 450),
+          width: existing?.width || item.width || 320,
+        };
+      });
 
       // Merge: keep non-job content, replace job content with latest from Firestore
       const jobIds = new Set(positioned.map(c => c.id));

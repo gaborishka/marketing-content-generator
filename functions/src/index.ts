@@ -281,7 +281,7 @@ export const generateVideo = onCall(
 // Quick onCall trigger: validates input, creates a job doc, returns { jobId }.
 // The actual pipeline runs asynchronously via processGenerationJob below.
 
-import { createJobDoc, updateJobDoc } from "./utils/firestore";
+import { createJobIfNoActive, updateJobDoc, clearJobLock } from "./utils/firestore";
 import { runOrchestrator } from "./agents/orchestrator";
 
 interface GenerateCampaignInput {
@@ -304,7 +304,8 @@ export const generateCampaignContent = onCall(
     const userId = request.auth.uid;
 
     try {
-      await createJobDoc(jobId, {
+      // Atomically check for active jobs and create in a single transaction
+      await createJobIfNoActive(jobId, {
         userId,
         campaignId,
         status: "pending",
@@ -318,6 +319,9 @@ export const generateCampaignContent = onCall(
 
       return { jobId };
     } catch (error: any) {
+      if (error.message === "ACTIVE_JOB_EXISTS") {
+        throw new HttpsError("already-exists", "A generation job is already running for this campaign.");
+      }
       console.error("generateCampaignContent error:", error);
       throw new HttpsError("internal", error.message || "Failed to create generation job.");
     }
@@ -371,6 +375,11 @@ export const processGenerationJob = onDocumentCreated(
         await updateJobDoc(jobId, { status: "failed", phase: "Failed", error: error.message || "Unexpected pipeline error" });
       } catch {
         console.error(`Failed to mark job ${jobId} as failed after unhandled error`);
+      }
+      try {
+        await clearJobLock(campaignId, userId, jobId);
+      } catch {
+        console.error(`Failed to clear job lock for campaign ${campaignId} after unhandled error`);
       }
     }
   }

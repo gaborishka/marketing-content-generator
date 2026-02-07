@@ -69,6 +69,18 @@ export async function runComplianceCheck(
           feedback: "Failed to parse compliance evaluation response",
           violations: ["Evaluation parse error"],
         });
+
+        // Persist parse failure to Firestore so frontend shows accurate state
+        await updateContentDoc(doc.id, {
+          complianceScore: 0,
+          complianceDetails: {
+            score: 0,
+            violations: ["Evaluation parse error"],
+            suggestions: [],
+            retryAttempt,
+          },
+        });
+
         continue;
       }
 
