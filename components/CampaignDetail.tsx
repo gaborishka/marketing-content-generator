@@ -42,7 +42,7 @@ import {
 } from 'lucide-react';
 import { useParams, Link } from 'react-router-dom';
 import { Campaign, Product, GeneratedContent, ComplianceRule, CHANNEL_FORMATS, getParentChannel } from '../types';
-import { CanvasBoard } from './CanvasBoard';
+import { CanvasBoard, INITIAL_CANVAS_SCALE } from './CanvasBoard';
 import { generateMarketingContent } from '../services/geminiService';
 import { VideoStoryboardModal } from './VideoStoryboardModal';
 import { ContentDetailModal } from './ContentDetailModal';
@@ -862,8 +862,8 @@ export const CampaignDetail: React.FC<CampaignDetailProps> = ({
                onDoubleClick={(e) => {
                  const rect = e.currentTarget.getBoundingClientRect();
                  handleCanvasDoubleClick({
-                   x: e.clientX - rect.left,
-                   y: e.clientY - rect.top,
+                   x: (e.clientX - rect.left) / INITIAL_CANVAS_SCALE,
+                   y: (e.clientY - rect.top) / INITIAL_CANVAS_SCALE,
                  });
                }}
              >

@@ -78,6 +78,7 @@ const CanvasCardInner: React.FC<CanvasCardProps> = ({
 
     return (
       <div
+        data-canvas-card
         data-generating="true"
         className="absolute flex flex-col bg-white rounded-xl shadow-lg border border-blue-100/80 z-10 overflow-hidden"
         style={{
@@ -171,6 +172,7 @@ const CanvasCardInner: React.FC<CanvasCardProps> = ({
 
   return (
     <div
+      data-canvas-card
       className={`absolute flex flex-col bg-white rounded-xl shadow-sm transition-shadow duration-200 select-none group ${
         isSelected ? 'ring-2 ring-blue-500 shadow-xl z-20' : 'hover:shadow-md border border-slate-200 z-10'
       }`}

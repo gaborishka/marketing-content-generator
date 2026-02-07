@@ -124,10 +124,17 @@ export const ContentCreationModal: React.FC<ContentCreationModalProps> = ({
 
   const isVideoStoryboard = getParentChannel(selectedChannel) === 'Video Storyboard';
 
-  // Close on Escape
+  // Close on Escape (only when not focused in a text field)
   useEffect(() => {
     const handleEsc = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
+      if (e.key !== 'Escape') return;
+      const active = document.activeElement;
+      if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || (active as HTMLElement).isContentEditable)) {
+        // Blur the field instead of closing the modal
+        (active as HTMLElement).blur();
+        return;
+      }
+      onClose();
     };
     document.addEventListener('keydown', handleEsc);
     return () => document.removeEventListener('keydown', handleEsc);
@@ -163,7 +170,10 @@ export const ContentCreationModal: React.FC<ContentCreationModalProps> = ({
       setImageDataUrl(reader.result as string);
       setImageError(null);
     };
+    reader.onerror = () => setImageError('Failed to read the selected file.');
     reader.readAsDataURL(file);
+    // Reset so re-selecting the same file triggers onChange again
+    e.target.value = '';
   };
 
   const handleDrop = (e: React.DragEvent) => {
@@ -177,6 +187,7 @@ export const ContentCreationModal: React.FC<ContentCreationModalProps> = ({
       setImageDataUrl(reader.result as string);
       setImageError(null);
     };
+    reader.onerror = () => setImageError('Failed to read the dropped file.');
     reader.readAsDataURL(file);
   };
 

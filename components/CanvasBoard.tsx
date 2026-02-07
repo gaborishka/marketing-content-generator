@@ -25,11 +25,13 @@ interface CanvasBoardProps {
 
 const noopDelete = () => {};
 
+export const INITIAL_CANVAS_SCALE = 0.8;
+
 export const CanvasBoard: React.FC<CanvasBoardProps> = ({ items, onItemsChange, onEdit, onDoubleClick, onCanvasDoubleClick, onPasteOnCanvas, pasteEnabled = true, brandName, focusTarget }) => {
   const containerRef = useRef<HTMLDivElement>(null);
 
   // Viewport State
-  const [scale, setScale] = useState(0.8); // Start slightly zoomed out
+  const [scale, setScale] = useState(INITIAL_CANVAS_SCALE);
   const [offset, setOffset] = useState({ x: 0, y: 0 });
 
   // Refs for paste handler to avoid re-registering on every pan/zoom
@@ -72,6 +74,8 @@ export const CanvasBoard: React.FC<CanvasBoardProps> = ({ items, onItemsChange, 
 
   // Mouse Event Handlers for the Canvas (Background)
   const handleMouseDown = (e: React.MouseEvent) => {
+    // Focus the canvas so it can receive paste events
+    containerRef.current?.focus();
     // If clicking on background
     if (e.button === 0) { // Left click
       if (interactionMode === 'pan' || e.altKey || e.metaKey) {
@@ -89,9 +93,11 @@ export const CanvasBoard: React.FC<CanvasBoardProps> = ({ items, onItemsChange, 
 
   // Double-click on empty canvas space → open content creation modal
   const handleCanvasDoubleClick = (e: React.MouseEvent) => {
-    // Only trigger if clicking on the canvas background (not a card or other child)
+    if (!onCanvasDoubleClick) return;
+    // Only trigger on the canvas background — ignore clicks inside cards
     const target = e.target as HTMLElement;
-    if (onCanvasDoubleClick && target.dataset.canvasBg !== undefined) {
+    const isInsideCard = target.closest('[data-canvas-card]');
+    if (!isInsideCard && containerRef.current?.contains(target)) {
       const pos = screenToCanvas(e.clientX, e.clientY);
       onCanvasDoubleClick(pos);
     }
@@ -197,6 +203,7 @@ export const CanvasBoard: React.FC<CanvasBoardProps> = ({ items, onItemsChange, 
               reader.onload = () => {
                 onPasteRef.current?.(getCanvasCenter(), undefined, reader.result as string);
               };
+              reader.onerror = () => { /* silently ignore unreadable clipboard image */ };
               reader.readAsDataURL(blob);
               e.preventDefault();
               return;
@@ -213,8 +220,8 @@ export const CanvasBoard: React.FC<CanvasBoardProps> = ({ items, onItemsChange, 
       }
     };
 
-    document.addEventListener('paste', handlePaste);
-    return () => document.removeEventListener('paste', handlePaste);
+    el.addEventListener('paste', handlePaste);
+    return () => el.removeEventListener('paste', handlePaste);
   }, []); // Registered once; screenToCanvas reads from refs
 
   // Card Handlers
@@ -339,8 +346,9 @@ export const CanvasBoard: React.FC<CanvasBoardProps> = ({ items, onItemsChange, 
       {/* Canvas Area */}
       <div
         ref={containerRef}
+        tabIndex={0}
         data-canvas-bg
-        className="flex-1 w-full h-full relative cursor-default"
+        className="flex-1 w-full h-full relative cursor-default outline-none"
         onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
