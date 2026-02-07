@@ -11,12 +11,30 @@ MarketGen AI — an enterprise AI marketing content generator built with React +
 - `npm run dev` — start dev server on port 3000
 - `npm run build` — production build via Vite
 - `npm run preview` — preview production build
+- `cd functions && npm test` — run Vitest tests for Cloud Functions agents/utils
+- `cd functions && npm run build` — compile Cloud Functions TypeScript
+- `firebase emulators:start --only functions,firestore` — start local emulators (Functions :5001, Firestore :8080)
 
-No test runner, linter, or formatter is configured.
+No linter or formatter is configured.
 
 ## Architecture
 
-**Flat file structure** — all source files are at the root or one level deep. No `src/` directory.
+**Frontend:** Flat file structure — all source files are at the root or one level deep. No `src/` directory.
+
+**Backend (`functions/src/`):**
+```
+functions/src/
+  index.ts                          # Cloud Function exports (5 functions)
+  agents/                           # Pipeline agents
+    orchestrator.ts, planner.ts, generator.ts, compliance.ts, assetManager.ts
+  prompts/                          # Prompt templates (separated from agent logic)
+    generator.prompt.ts, compliance.prompt.ts
+  types/
+    pipeline.ts                     # PlannerContext, AgentResult<T>, ComplianceResult, ContentDoc, JobStatus
+  utils/
+    gemini.ts, firestore.ts, storage.ts, timeout.ts, progress.ts
+  __tests__/                        # Vitest tests for all agents and utils
+```
 
 ### Entry & Routing
 
@@ -29,26 +47,59 @@ No test runner, linter, or formatter is configured.
 - **All state flows top-down from App.tsx** — no context providers or state management library. Components receive data and callbacks as props.
 - `services/storageService.ts` — IndexedDB wrapper (`MarketGenDB`) with three object stores: `products`, `campaigns`, `content`. Simple `getAll`, `put`, `clear` API.
 - State updates in App.tsx write to both React state and IndexedDB in parallel (fire-and-forget DB writes).
+- **Firestore collections** (server-side, used by backend agent pipeline):
+  - `campaigns`, `products`, `content`, `complianceRules` — user-scoped documents (read/write by auth owner)
+  - `generationJobs` — pipeline job tracking. Read-only for auth owner; created/updated only by Cloud Functions.
+  - `content` extended with `generationJobId` and `complianceDetails` fields for pipeline back-references.
+  - Composite indexes on `content` and `generationJobs` for `campaignId` + `userId` queries (see `firestore.indexes.json`).
 
 ### AI Service Layer
 
-- `services/geminiService.ts` — all Gemini API interactions:
-  - `generateMarketingContent()` — text generation via `gemini-3-flash-preview` with structured JSON output schema. Falls back to `mockGeneration()` if no API key or on error.
-  - `generateImage()` — image generation via `gemini-3-pro-image-preview`. Falls back to picsum.photos placeholder URLs.
-  - `generateVideoFromStoryboard()` — video generation via `veo-3.1-generate-preview` with polling loop. Requires real base64 images (not URLs).
-  - Image generation runs as a fire-and-forget async loop after text generation completes, updating cards one at a time via `onImageUpdate` callback.
+- `services/geminiService.ts` — client-side Gemini interactions for standalone use:
+  - `generateImage()` — single image generation via Cloud Function `generateImage`. Falls back to picsum.photos placeholder URLs.
+  - `generateVideoFromStoryboard()` — video generation via Cloud Function `generateVideo` with polling loop.
+- `services/orchestrationService.ts` — frontend integration with backend agent pipeline:
+  - `startGeneration(campaignId)` — calls `generateCampaignContent` Cloud Function, returns jobId.
+  - `subscribeToJob(jobId, callback)` — Firestore onSnapshot for real-time job progress.
+  - `subscribeToContent(campaignId, callback)` — Firestore onSnapshot for content doc updates.
+- Content generation (text + images + compliance) is fully handled by the backend agent pipeline.
+
+### Backend Agent Pipeline
+
+Content generation is orchestrated server-side via a multi-agent pipeline in Cloud Functions:
+
+- **Trigger/Processor split** — `generateCampaignContent` (onCall, 30s) creates a job doc and returns `{ jobId }` instantly. `processGenerationJob` (onDocumentCreated on `generationJobs/{jobId}`, 540s) runs the full pipeline.
+- **Orchestrator** (`functions/src/agents/orchestrator.ts`) — deterministic code controller, not LLM-based. Runs: Planner -> Generator -> Compliance -> (retry?) -> Asset Manager.
+- **Planner** (`functions/src/agents/planner.ts`) — assembles minimal PlannerContext from Firestore (campaign, products, compliance rule, existing content).
+- **Generator** (`functions/src/agents/generator.ts`) — text generation via Gemini Flash with structured JSON output. Writes content docs to Firestore.
+- **Compliance** (`functions/src/agents/compliance.ts`) — evaluator-optimizer loop. Separate Gemini call per item. Failed items (score < 80) trigger regeneration, max 2 retries.
+- **Asset Manager** (`functions/src/agents/assetManager.ts`) — parallel image generation via Gemini, uploads to Firebase Storage, updates Firestore content docs. Skipped if < 120s budget remains.
+- **Prompt templates** live in `functions/src/prompts/` (separated from agent logic).
+- **Pipeline types** defined in `functions/src/types/pipeline.ts`.
+
+### Cloud Functions (`functions/src/index.ts`)
+
+5 exported Cloud Functions (Firebase Functions v2):
+- `generateContent` (onCall, 120s) — single Gemini text generation call (legacy, kept for backward compat)
+- `generateImage` (onCall, 120s) — single Gemini image generation call
+- `generateVideo` (onCall, 540s) — Veo video generation with polling + Storage upload
+- `generateCampaignContent` (onCall, 30s) — pipeline trigger: validates input, creates job doc, returns `{ jobId }`
+- `processGenerationJob` (onDocumentCreated, 540s) — pipeline processor: runs full agent orchestrator
+
+All functions require authentication and use `GEMINI_API_KEY` via `defineSecret` (single instance in `utils/gemini.ts`).
 
 ### API Key
 
 - The Gemini API key comes from `GEMINI_API_KEY` in `.env.local`
 - Vite config injects it as `process.env.API_KEY` and `process.env.GEMINI_API_KEY` at build time
 - Also supports AI Studio runtime key selection via `window.aistudio` (shows key connect screen if not available)
+- Server-side: `defineSecret("GEMINI_API_KEY")` in `functions/src/utils/gemini.ts`, shared by all Cloud Functions
 
 ### Key Components
 
 - `components/Layout.tsx` — sidebar + header shell with react-router navigation
-- `components/ContentGenerator.tsx` — 2-step campaign creation wizard (scope selection → strategy config → generate)
-- `components/CampaignDetail.tsx` — campaign workspace with left sidebar controls (context, products, audiences, channels) and canvas area. Handles "Generate New Variants" with placeholder-then-fill pattern.
+- `components/ContentGenerator.tsx` — 2-step campaign creation wizard (scope selection -> strategy config -> generate)
+- `components/CampaignDetail.tsx` — campaign workspace with left sidebar controls (context, products, audiences, channels) and canvas area. Calls backend pipeline via `startGeneration()` and subscribes to Firestore for real-time updates.
 - `components/CanvasBoard.tsx` — infinite canvas with pan/zoom, card drag, multi-select. Renders SVG connection lines between cards.
 - `components/CanvasCard.tsx` — content card with channel-specific styling, compliance badge, image/storyboard preview
 - `components/VideoStoryboardModal.tsx` — modal for video storyboard review and Veo video generation
@@ -63,9 +114,20 @@ No test runner, linter, or formatter is configured.
 
 - `types.ts` — all shared interfaces: `Product`, `Campaign`, `GeneratedContent`, `Scene`, `DashboardMetrics`, `ChartData`
 - `GeneratedContent` has canvas positioning fields (`x`, `y`, `width`) and optional video fields (`storyboard`, `videoUrl`, `videoStatus`)
+- `GeneratedContent` extended with `generationJobId?: string` and `complianceDetails?` for pipeline integration
 - Campaign supports both product-focused and brand/idea campaigns (`primaryProductId` is optional)
+- `functions/src/types/pipeline.ts` — backend pipeline types: `PlannerContext`, `AgentResult<T>`, `ComplianceResult`, `ContentDoc`, `JobStatus`
 
 ### Dependencies
 
-- React 19, react-router-dom 7, recharts (dashboard charts), lucide-react (icons), @google/genai (Gemini SDK)
+- **Frontend:** React 19, react-router-dom 7, recharts (dashboard charts), lucide-react (icons), @google/genai (Gemini SDK)
+- **Backend (functions/):** firebase-admin, firebase-functions v6, @google/genai (Gemini SDK), vitest (dev)
 - `index.html` contains an importmap pointing to esm.sh CDN — this is for the AI Studio sandbox runtime, not used during local Vite dev
+
+### Testing
+
+- `cd functions && npm test` — runs `vitest run` for backend agent tests
+- Tests live in `functions/src/__tests__/*.test.ts`
+- Test config: `functions/vitest.config.ts`
+- Mocking pattern: `vi.mock("../utils/gemini")`, `vi.mock("../utils/firestore")` etc. to isolate agents from Firebase/Gemini SDK
+- No frontend test runner is configured

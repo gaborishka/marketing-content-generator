@@ -244,6 +244,38 @@ function App() {
     }));
   };
 
+  const handleProductCreate = (product: Product) => {
+    setProducts(prev => [product, ...prev]);
+    storage.put('products', product);
+  };
+
+  const handleProductUpdate = (product: Product) => {
+    setProducts(prev => prev.map(p => p.id === product.id ? product : p));
+    storage.put('products', product);
+  };
+
+  const handleProductDelete = (productId: string) => {
+    setProducts(prev => prev.filter(p => p.id !== productId));
+    storage.deleteItem('products', productId);
+    // Clear product references from any campaigns
+    setCampaigns(prev => prev.map(c => {
+      let updated = c;
+      let changed = false;
+      if (c.primaryProductId === productId) {
+        updated = { ...updated, primaryProductId: undefined };
+        changed = true;
+      }
+      if (c.secondaryProductIds.includes(productId)) {
+        updated = { ...updated, secondaryProductIds: c.secondaryProductIds.filter(id => id !== productId) };
+        changed = true;
+      }
+      if (changed) {
+        storage.put('campaigns', updated);
+      }
+      return changed ? updated : c;
+    }));
+  };
+
   const handleBrandCreate = (brand: Brand) => {
     setBrands(prev => [brand, ...prev]);
     storage.put('brands', brand);
@@ -275,7 +307,7 @@ function App() {
     let removedIds: string[] = [];
 
     setContentStore(prev => {
-      const prevMap = new Map(prev.map(c => [c.id, c]));
+      const prevMap = new Map<string, GeneratedContent>(prev.map(c => [c.id, c]));
       mergedList = newContentList.map(item => {
         const existing = prevMap.get(item.id);
         if (existing) {
@@ -408,7 +440,14 @@ function App() {
               />
             } 
           />
-          <Route path="/products" element={<ProductCatalog products={products} />} />
+          <Route path="/products" element={
+            <ProductCatalog
+              products={products}
+              onCreate={handleProductCreate}
+              onUpdate={handleProductUpdate}
+              onDelete={handleProductDelete}
+            />
+          } />
           <Route
             path="/brands"
             element={

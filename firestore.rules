@@ -30,6 +30,15 @@ service cloud.firestore {
                     && request.resource.data.userId == request.auth.uid;
       allow delete: if request.auth != null && resource.data.userId == request.auth.uid;
     }
+    // Generation jobs: read-only for authenticated owner, created by Cloud Functions only
+    match /generationJobs/{id} {
+      allow read: if request.auth != null && resource.data.userId == request.auth.uid;
+      allow create, update, delete: if false;
+    }
+    // Job locks: server-side only, no client access
+    match /generationJobLocks/{id} {
+      allow read, write: if false;
+    }
     match /{document=**} { allow read, write: if false; }
   }
 }

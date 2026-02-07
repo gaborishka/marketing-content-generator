@@ -19,6 +19,7 @@ import { GeneratedContent, getParentChannel } from '../types';
 import { TwitterPreview } from './previews/TwitterPreview';
 import { LinkedInPreview } from './previews/LinkedInPreview';
 import { InstagramPreview } from './previews/InstagramPreview';
+import { RevealImage } from './RevealImage';
 
 interface CanvasCardProps {
   content: GeneratedContent;
@@ -289,7 +290,7 @@ const CanvasCardInner: React.FC<CanvasCardProps> = ({
                 {content.storyboard.slice(0, 3).map((scene, i) => (
                   <div key={i} className="relative h-full bg-slate-200 overflow-hidden">
                      {scene.imageUrl ? (
-                       <img src={scene.imageUrl} className="w-full h-full object-cover animate-fadeIn" />
+                       <RevealImage src={scene.imageUrl} className="w-full h-full object-cover" />
                      ) : (
                        <div className="w-full h-full flex items-center justify-center bg-slate-200">
                          <Loader2 size={16} className="text-slate-400 animate-spin" />
@@ -307,7 +308,7 @@ const CanvasCardInner: React.FC<CanvasCardProps> = ({
             ) : (
               content.imageUrl ? (
                 <>
-                  <img src={content.imageUrl} alt="Asset" className="w-full h-full object-cover animate-fadeIn" draggable={false} />
+                  <RevealImage src={content.imageUrl} alt="Asset" className="w-full h-full object-cover" draggable={false} />
                   <div className="absolute bottom-2 right-2 flex space-x-1 opacity-0 group-hover:opacity-100 transition-opacity">
                     <button className="p-1.5 bg-black/60 text-white rounded hover:bg-black/80">
                       <Maximize2 size={12} />

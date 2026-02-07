@@ -26,3 +26,6 @@ functions/node_modules/
 *.njsproj
 *.sln
 *.sw?
+
+# ralphex progress logs
+progress*.txt

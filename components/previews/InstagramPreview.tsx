@@ -1,5 +1,6 @@
 import React from 'react';
 import { Heart, MessageCircle, Send, Bookmark, MoreHorizontal, Loader2 } from 'lucide-react';
+import { RevealImage } from '../RevealImage';
 
 import { PlatformPreviewProps } from './TwitterPreview';
 
@@ -29,7 +30,7 @@ export const InstagramPreview: React.FC<PlatformPreviewProps> = ({ text, imageUr
 
       {/* Image - square 1:1, full width */}
       {imageUrl ? (
-        <img
+        <RevealImage
           src={imageUrl}
           alt="Post media"
           className="w-full aspect-square object-cover"
