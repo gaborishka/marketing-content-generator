@@ -60,13 +60,13 @@ export const CanvasBoard: React.FC<CanvasBoardProps> = ({ items, onItemsChange, 
     setOffset(targetOffset);
   }, [focusTarget]);
 
-  // Convert screen coordinates to canvas world coordinates
+  // Convert screen coordinates to canvas world coordinates (uses refs for stable access)
   const screenToCanvas = (clientX: number, clientY: number) => {
     const rect = containerRef.current?.getBoundingClientRect();
     if (!rect) return { x: 0, y: 0 };
     return {
-      x: (clientX - rect.left - offset.x) / scale,
-      y: (clientY - rect.top - offset.y) / scale,
+      x: (clientX - rect.left - offsetRef.current.x) / scaleRef.current,
+      y: (clientY - rect.top - offsetRef.current.y) / scaleRef.current,
     };
   };
 
@@ -89,8 +89,9 @@ export const CanvasBoard: React.FC<CanvasBoardProps> = ({ items, onItemsChange, 
 
   // Double-click on empty canvas space → open content creation modal
   const handleCanvasDoubleClick = (e: React.MouseEvent) => {
-    // Only trigger if clicking on the background (not a card)
-    if (onCanvasDoubleClick && e.target === e.currentTarget) {
+    // Only trigger if clicking on the canvas background (not a card or other child)
+    const target = e.target as HTMLElement;
+    if (onCanvasDoubleClick && target.dataset.canvasBg !== undefined) {
       const pos = screenToCanvas(e.clientX, e.clientY);
       onCanvasDoubleClick(pos);
     }
@@ -171,14 +172,6 @@ export const CanvasBoard: React.FC<CanvasBoardProps> = ({ items, onItemsChange, 
     const el = containerRef.current;
     if (!el) return;
 
-    const screenToCanvasFromRefs = (clientX: number, clientY: number) => {
-      const rect = el.getBoundingClientRect();
-      return {
-        x: (clientX - rect.left - offsetRef.current.x) / scaleRef.current,
-        y: (clientY - rect.top - offsetRef.current.y) / scaleRef.current,
-      };
-    };
-
     const handlePaste = (e: ClipboardEvent) => {
       if (!onPasteRef.current || !pasteEnabledRef.current) return;
 
@@ -187,6 +180,11 @@ export const CanvasBoard: React.FC<CanvasBoardProps> = ({ items, onItemsChange, 
       if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.tagName === 'SELECT' || (active as HTMLElement).isContentEditable)) {
         return;
       }
+
+      const getCanvasCenter = () => {
+        const rect = el.getBoundingClientRect();
+        return screenToCanvas(rect.left + rect.width / 2, rect.top + rect.height / 2);
+      };
 
       // Check for image in clipboard
       const items = e.clipboardData?.items;
@@ -197,12 +195,7 @@ export const CanvasBoard: React.FC<CanvasBoardProps> = ({ items, onItemsChange, 
             if (blob) {
               const reader = new FileReader();
               reader.onload = () => {
-                const rect = el.getBoundingClientRect();
-                const canvasCenter = screenToCanvasFromRefs(
-                  rect.left + rect.width / 2,
-                  rect.top + rect.height / 2
-                );
-                onPasteRef.current?.(canvasCenter, undefined, reader.result as string);
+                onPasteRef.current?.(getCanvasCenter(), undefined, reader.result as string);
               };
               reader.readAsDataURL(blob);
               e.preventDefault();
@@ -215,19 +208,14 @@ export const CanvasBoard: React.FC<CanvasBoardProps> = ({ items, onItemsChange, 
       // Check for text
       const pastedText = e.clipboardData?.getData('text/plain');
       if (pastedText && pastedText.trim()) {
-        const rect = el.getBoundingClientRect();
-        const canvasCenter = screenToCanvasFromRefs(
-          rect.left + rect.width / 2,
-          rect.top + rect.height / 2
-        );
-        onPasteRef.current(canvasCenter, pastedText.trim(), undefined);
+        onPasteRef.current(getCanvasCenter(), pastedText.trim(), undefined);
         e.preventDefault();
       }
     };
 
     document.addEventListener('paste', handlePaste);
     return () => document.removeEventListener('paste', handlePaste);
-  }, []); // Registered once, reads from refs
+  }, []); // Registered once; screenToCanvas reads from refs
 
   // Card Handlers
   const handleCardMouseDown = (e: React.MouseEvent, id: string) => {
@@ -351,6 +339,7 @@ export const CanvasBoard: React.FC<CanvasBoardProps> = ({ items, onItemsChange, 
       {/* Canvas Area */}
       <div
         ref={containerRef}
+        data-canvas-bg
         className="flex-1 w-full h-full relative cursor-default"
         onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}

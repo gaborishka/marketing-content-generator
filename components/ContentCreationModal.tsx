@@ -109,6 +109,7 @@ export const ContentCreationModal: React.FC<ContentCreationModalProps> = ({
   const [selectedAudience, setSelectedAudience] = useState(existingAudiences[0] || 'General Public');
   const [isChannelDropdownOpen, setIsChannelDropdownOpen] = useState(false);
   const [isDragOver, setIsDragOver] = useState(false);
+  const [imageError, setImageError] = useState<string | null>(null);
 
   const sceneKeyCounter = useRef(3);
   const [scenes, setScenes] = useState<SceneWithKey[]>([
@@ -146,9 +147,10 @@ export const ContentCreationModal: React.FC<ContentCreationModalProps> = ({
 
   const validateImageSize = useCallback((file: File): boolean => {
     if (file.size > MAX_IMAGE_SIZE_BYTES) {
-      alert(`Image is too large (${(file.size / 1024 / 1024).toFixed(1)} MB). Maximum size is 10 MB.`);
+      setImageError(`Image is too large (${(file.size / 1024 / 1024).toFixed(1)} MB). Maximum size is 10 MB.`);
       return false;
     }
+    setImageError(null);
     return true;
   }, []);
 
@@ -159,6 +161,7 @@ export const ContentCreationModal: React.FC<ContentCreationModalProps> = ({
     const reader = new FileReader();
     reader.onload = () => {
       setImageDataUrl(reader.result as string);
+      setImageError(null);
     };
     reader.readAsDataURL(file);
   };
@@ -172,6 +175,7 @@ export const ContentCreationModal: React.FC<ContentCreationModalProps> = ({
     const reader = new FileReader();
     reader.onload = () => {
       setImageDataUrl(reader.result as string);
+      setImageError(null);
     };
     reader.readAsDataURL(file);
   };
@@ -539,6 +543,11 @@ export const ContentCreationModal: React.FC<ContentCreationModalProps> = ({
                   className="hidden"
                   onChange={handleFileSelect}
                 />
+                {imageError && (
+                  <p className="mt-2 text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+                    {imageError}
+                  </p>
+                )}
               </div>
             </>
           )}
