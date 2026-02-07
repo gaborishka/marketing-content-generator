@@ -23,8 +23,15 @@ vi.mock("../agents/planner", () => ({
 }));
 
 const mockGenerateText = vi.fn();
+const mockRegenerateText = vi.fn();
 vi.mock("../agents/generator", () => ({
   generateText: (...args: any[]) => mockGenerateText(...args),
+  regenerateText: (...args: any[]) => mockRegenerateText(...args),
+}));
+
+const mockRunComplianceCheck = vi.fn();
+vi.mock("../agents/compliance", () => ({
+  runComplianceCheck: (...args: any[]) => mockRunComplianceCheck(...args),
 }));
 
 import { runOrchestrator, OrchestratorInput } from "../agents/orchestrator";
@@ -59,6 +66,14 @@ const plannerContext: PlannerContext = {
     { channel: "Email Newsletter", audience: "Millennials" },
   ],
   existingCombinations: [],
+};
+
+const plannerContextWithCompliance: PlannerContext = {
+  ...plannerContext,
+  complianceRule: {
+    name: "FTC Advertising",
+    ruleText: "No unsubstantiated claims",
+  },
 };
 
 const contentDocs: ContentDoc[] = [
@@ -123,6 +138,16 @@ describe("runOrchestrator", () => {
     expect(mockSetPhase).toHaveBeenCalledWith("planning", "Gathering context...", 10);
     expect(mockSetPhase).toHaveBeenCalledWith("generating", "Generating copy...", 30);
     expect(mockComplete).toHaveBeenCalledWith(["gen-job-1-1", "gen-job-1-2"]);
+  });
+
+  it("skips compliance when no compliance rule in planner context", async () => {
+    mockRunPlanner.mockResolvedValue({ success: true, data: plannerContext });
+    mockGenerateText.mockResolvedValue({ success: true, data: contentDocs });
+
+    await runOrchestrator(baseInput);
+
+    expect(mockRunComplianceCheck).not.toHaveBeenCalled();
+    expect(mockRegenerateText).not.toHaveBeenCalled();
   });
 
   it("fails when planner returns error", async () => {
@@ -218,7 +243,7 @@ describe("runOrchestrator", () => {
       expect.objectContaining({
         contentIds: ["gen-job-1-1", "gen-job-1-2"],
         itemsCompleted: 2,
-        progress: 70,
+        progress: 50,
       })
     );
   });
@@ -231,5 +256,295 @@ describe("runOrchestrator", () => {
 
     expect(result.success).toBe(false);
     expect(result.error).toBe("Original error");
+  });
+});
+
+// ── Compliance Loop Tests ───────────────────────────────────────────────────
+
+describe("runOrchestrator - compliance loop", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("runs compliance check when complianceRule is present", async () => {
+    mockRunPlanner.mockResolvedValue({
+      success: true,
+      data: plannerContextWithCompliance,
+    });
+    mockGenerateText.mockResolvedValue({ success: true, data: contentDocs });
+    mockRunComplianceCheck.mockResolvedValue({
+      success: true,
+      data: [
+        { contentId: "gen-job-1-1", score: 92, pass: true, feedback: "Good", violations: [] },
+        { contentId: "gen-job-1-2", score: 88, pass: true, feedback: "Good", violations: [] },
+      ],
+    });
+
+    const result = await runOrchestrator(baseInput);
+
+    expect(result.success).toBe(true);
+    expect(mockRunComplianceCheck).toHaveBeenCalledWith(
+      contentDocs,
+      "FTC Advertising",
+      "No unsubstantiated claims",
+      0
+    );
+    expect(mockSetPhase).toHaveBeenCalledWith(
+      "compliance_check",
+      "Checking compliance...",
+      55
+    );
+  });
+
+  it("retries failed items with regenerateText", async () => {
+    mockRunPlanner.mockResolvedValue({
+      success: true,
+      data: plannerContextWithCompliance,
+    });
+    mockGenerateText.mockResolvedValue({ success: true, data: contentDocs });
+
+    // First compliance check: one item fails
+    mockRunComplianceCheck.mockResolvedValueOnce({
+      success: true,
+      data: [
+        {
+          contentId: "gen-job-1-1",
+          score: 55,
+          pass: false,
+          feedback: "Unsubstantiated claim",
+          violations: ["Superlative without evidence"],
+          suggestedFix: "Remove superlative",
+        },
+        { contentId: "gen-job-1-2", score: 92, pass: true, feedback: "Good", violations: [] },
+      ],
+    });
+
+    // Regeneration succeeds
+    const regeneratedDoc: ContentDoc = {
+      ...contentDocs[0],
+      text: "Revised content",
+      complianceScore: 90,
+    };
+    mockRegenerateText.mockResolvedValue({
+      success: true,
+      data: regeneratedDoc,
+    });
+
+    // Second compliance check: all pass
+    mockRunComplianceCheck.mockResolvedValueOnce({
+      success: true,
+      data: [
+        { contentId: "gen-job-1-1", score: 90, pass: true, feedback: "Improved", violations: [] },
+        { contentId: "gen-job-1-2", score: 92, pass: true, feedback: "Good", violations: [] },
+      ],
+    });
+
+    const result = await runOrchestrator(baseInput);
+
+    expect(result.success).toBe(true);
+    expect(mockRunComplianceCheck).toHaveBeenCalledTimes(2);
+    expect(mockRegenerateText).toHaveBeenCalledTimes(1);
+    expect(mockRegenerateText).toHaveBeenCalledWith(
+      plannerContextWithCompliance,
+      contentDocs[0],
+      {
+        contentId: "gen-job-1-1",
+        score: 55,
+        violations: ["Superlative without evidence"],
+        suggestedFix: "Remove superlative",
+      }
+    );
+
+    // Should have updated progress with retry status
+    expect(mockUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: "retrying",
+        retryCount: 1,
+      })
+    );
+  });
+
+  it("caps retries at MAX_COMPLIANCE_RETRIES (2)", async () => {
+    mockRunPlanner.mockResolvedValue({
+      success: true,
+      data: plannerContextWithCompliance,
+    });
+    mockGenerateText.mockResolvedValue({ success: true, data: contentDocs });
+
+    // All compliance checks return failures
+    const failureResult = {
+      success: true,
+      data: [
+        {
+          contentId: "gen-job-1-1",
+          score: 50,
+          pass: false,
+          feedback: "Still failing",
+          violations: ["Persistent issue"],
+          suggestedFix: "Try harder",
+        },
+        { contentId: "gen-job-1-2", score: 92, pass: true, feedback: "Good", violations: [] },
+      ],
+    };
+
+    mockRunComplianceCheck
+      .mockResolvedValueOnce(failureResult)  // initial check
+      .mockResolvedValueOnce(failureResult)  // after retry 1
+      .mockResolvedValueOnce(failureResult); // after retry 2
+
+    const regeneratedDoc: ContentDoc = {
+      ...contentDocs[0],
+      text: "Revised again",
+      complianceScore: 55,
+    };
+    mockRegenerateText.mockResolvedValue({
+      success: true,
+      data: regeneratedDoc,
+    });
+
+    const result = await runOrchestrator(baseInput);
+
+    expect(result.success).toBe(true);
+    // 3 compliance checks: initial + 2 after retries
+    expect(mockRunComplianceCheck).toHaveBeenCalledTimes(3);
+    // 2 regenerations (max retries)
+    expect(mockRegenerateText).toHaveBeenCalledTimes(2);
+  });
+
+  it("continues without compliance if compliance check fails", async () => {
+    mockRunPlanner.mockResolvedValue({
+      success: true,
+      data: plannerContextWithCompliance,
+    });
+    mockGenerateText.mockResolvedValue({ success: true, data: contentDocs });
+    mockRunComplianceCheck.mockResolvedValue({
+      success: false,
+      error: "Gemini API error",
+    });
+
+    const result = await runOrchestrator(baseInput);
+
+    // Should still succeed — compliance failure is non-blocking
+    expect(result.success).toBe(true);
+    expect(mockRegenerateText).not.toHaveBeenCalled();
+  });
+
+  it("handles regeneration failure gracefully", async () => {
+    mockRunPlanner.mockResolvedValue({
+      success: true,
+      data: plannerContextWithCompliance,
+    });
+    mockGenerateText.mockResolvedValue({ success: true, data: contentDocs });
+
+    mockRunComplianceCheck
+      .mockResolvedValueOnce({
+        success: true,
+        data: [
+          {
+            contentId: "gen-job-1-1",
+            score: 50,
+            pass: false,
+            feedback: "Bad",
+            violations: ["Issue"],
+          },
+          { contentId: "gen-job-1-2", score: 92, pass: true, feedback: "OK", violations: [] },
+        ],
+      })
+      // After failed regen, compliance runs again with original docs
+      .mockResolvedValueOnce({
+        success: true,
+        data: [
+          { contentId: "gen-job-1-1", score: 50, pass: false, feedback: "Still bad", violations: ["Issue"] },
+          { contentId: "gen-job-1-2", score: 92, pass: true, feedback: "OK", violations: [] },
+        ],
+      })
+      .mockResolvedValueOnce({
+        success: true,
+        data: [
+          { contentId: "gen-job-1-1", score: 50, pass: false, feedback: "Still bad", violations: ["Issue"] },
+          { contentId: "gen-job-1-2", score: 92, pass: true, feedback: "OK", violations: [] },
+        ],
+      });
+
+    // Regeneration fails
+    mockRegenerateText.mockResolvedValue({
+      success: false,
+      error: "Regeneration failed",
+    });
+
+    const result = await runOrchestrator(baseInput);
+
+    // Should still succeed overall — regen failure doesn't block the pipeline
+    expect(result.success).toBe(true);
+  });
+
+  it("stops compliance loop early when all items pass after retry", async () => {
+    mockRunPlanner.mockResolvedValue({
+      success: true,
+      data: plannerContextWithCompliance,
+    });
+    mockGenerateText.mockResolvedValue({ success: true, data: contentDocs });
+
+    // First check: failure
+    mockRunComplianceCheck.mockResolvedValueOnce({
+      success: true,
+      data: [
+        {
+          contentId: "gen-job-1-1",
+          score: 60,
+          pass: false,
+          feedback: "Bad",
+          violations: ["Issue"],
+        },
+        { contentId: "gen-job-1-2", score: 88, pass: true, feedback: "Good", violations: [] },
+      ],
+    });
+
+    const regeneratedDoc: ContentDoc = {
+      ...contentDocs[0],
+      text: "Fixed content",
+      complianceScore: 95,
+    };
+    mockRegenerateText.mockResolvedValue({ success: true, data: regeneratedDoc });
+
+    // Second check: all pass now
+    mockRunComplianceCheck.mockResolvedValueOnce({
+      success: true,
+      data: [
+        { contentId: "gen-job-1-1", score: 95, pass: true, feedback: "Fixed", violations: [] },
+        { contentId: "gen-job-1-2", score: 88, pass: true, feedback: "Good", violations: [] },
+      ],
+    });
+
+    await runOrchestrator(baseInput);
+
+    // Only 2 compliance checks (not 3), because all passed after first retry
+    expect(mockRunComplianceCheck).toHaveBeenCalledTimes(2);
+    expect(mockRegenerateText).toHaveBeenCalledTimes(1);
+  });
+
+  it("writes compliance review complete progress after loop", async () => {
+    mockRunPlanner.mockResolvedValue({
+      success: true,
+      data: plannerContextWithCompliance,
+    });
+    mockGenerateText.mockResolvedValue({ success: true, data: contentDocs });
+    mockRunComplianceCheck.mockResolvedValue({
+      success: true,
+      data: [
+        { contentId: "gen-job-1-1", score: 90, pass: true, feedback: "Good", violations: [] },
+        { contentId: "gen-job-1-2", score: 88, pass: true, feedback: "Good", violations: [] },
+      ],
+    });
+
+    await runOrchestrator(baseInput);
+
+    expect(mockUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: "compliance_check",
+        phase: "Compliance review complete",
+        progress: 70,
+      })
+    );
   });
 });

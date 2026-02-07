@@ -337,22 +337,22 @@ components/
 
 ### Phase 4: Compliance Evaluator-Optimizer Loop
 
-- [ ] Create `functions/src/prompts/compliance.prompt.ts` — evaluation prompt template (separate from generation)
-- [ ] Create `functions/src/agents/compliance.ts` — compliance evaluator
-  - [ ] Separate Gemini Flash call per content item (not self-evaluation)
-  - [ ] Structured output: score, pass/fail, violations[], suggestedFix
-  - [ ] Return `ComplianceResult[]` with actionable feedback
-- [ ] Add `regenerateText()` to `generator.ts`
-  - [ ] Accept ComplianceFeedback[] parameter
-  - [ ] Inject specific violations + suggestedFix into the regeneration prompt
-  - [ ] Only regenerate failed items (not the full batch)
-- [ ] Wire compliance loop into orchestrator
-  - [ ] After text generation: run compliance check
-  - [ ] If any item scores < 80%: call `regenerateText()` with feedback
-  - [ ] Max 2 retries per item, then accept with best score achieved
-  - [ ] Update progress/phase in job doc for each loop iteration
-- [ ] Add `complianceDetails` field to content docs in Firestore
-- [ ] Test: create strict compliance rule, verify items are regenerated with feedback
+- [x] Create `functions/src/prompts/compliance.prompt.ts` — evaluation prompt template (separate from generation)
+- [x] Create `functions/src/agents/compliance.ts` — compliance evaluator
+  - [x] Separate Gemini Flash call per content item (not self-evaluation)
+  - [x] Structured output: score, pass/fail, violations[], suggestedFix
+  - [x] Return `ComplianceResult[]` with actionable feedback
+- [x] Add `regenerateText()` to `generator.ts`
+  - [x] Accept ComplianceFeedback[] parameter
+  - [x] Inject specific violations + suggestedFix into the regeneration prompt
+  - [x] Only regenerate failed items (not the full batch)
+- [x] Wire compliance loop into orchestrator
+  - [x] After text generation: run compliance check
+  - [x] If any item scores < 80%: call `regenerateText()` with feedback
+  - [x] Max 2 retries per item, then accept with best score achieved
+  - [x] Update progress/phase in job doc for each loop iteration
+- [x] Add `complianceDetails` field to content docs in Firestore
+- [x] Test: create strict compliance rule, verify items are regenerated with feedback
 
 ### Phase 5: Asset Manager — Server-Side Image Generation
 
