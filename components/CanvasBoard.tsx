@@ -287,7 +287,7 @@ export const CanvasBoard: React.FC<CanvasBoardProps> = ({ items, onItemsChange, 
                 );
                 onCanvasDoubleClick(pos);
               }}
-              className="p-2 rounded-lg text-white bg-blue-600 hover:bg-blue-700 transition-colors shadow-sm shadow-blue-500/20"
+              className="p-2 rounded-lg transition-colors text-slate-500 hover:bg-slate-100"
               title="Add Content"
             >
               <Plus size={18} />
