@@ -401,15 +401,15 @@ components/
 
 ## Verification Checklist
 
-- [ ] `cd functions && npm run build` — compiles without errors
-- [ ] `firebase emulators:start --only functions,firestore` — emulator starts successfully
-- [ ] Generate content → jobId returned in <2s
-- [ ] Firestore job doc updates in real-time (status, progress, phase)
-- [ ] Content docs appear in Firestore as text is generated
-- [ ] Images upload to Storage and URLs appear in content docs
-- [ ] Compliance loop: strict rule → items <80% regenerated with feedback
-- [ ] Compliance loop: max 2 retries respected, remaining items flagged
-- [ ] Error recovery: API failure → job status = 'failed' with error message
-- [ ] Timeout safety: long generation → image phase skipped if <120s remains
-- [ ] Existing `generateContent`, `generateImage`, `generateVideo` functions still work
-- [ ] Video generation (user-initiated via VideoStoryboardModal) unaffected
+- [x] `cd functions && npm run build` — compiles without errors
+- [x] `firebase emulators:start --only functions,firestore` — emulator starts successfully
+- [x] Generate content → jobId returned in <2s
+- [x] Firestore job doc updates in real-time (status, progress, phase)
+- [x] Content docs appear in Firestore as text is generated
+- [x] Images upload to Storage and URLs appear in content docs
+- [x] Compliance loop: strict rule → items <80% regenerated with feedback
+- [x] Compliance loop: max 2 retries respected, remaining items flagged
+- [x] Error recovery: API failure → job status = 'failed' with error message
+- [x] Timeout safety: long generation → image phase skipped if <120s remains
+- [x] Existing `generateContent`, `generateImage`, `generateVideo` functions still work
+- [x] Video generation (user-initiated via VideoStoryboardModal) unaffected
