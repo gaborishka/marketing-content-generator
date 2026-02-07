@@ -1,5 +1,6 @@
 import React from 'react';
 import { ThumbsUp, MessageSquare, Repeat2, Send, Globe, Loader2 } from 'lucide-react';
+import { RevealImage } from '../RevealImage';
 
 import { PlatformPreviewProps } from './TwitterPreview';
 
@@ -34,7 +35,7 @@ export const LinkedInPreview: React.FC<PlatformPreviewProps> = ({ text, imageUrl
 
       {/* Image - full width, no horizontal padding */}
       {imageUrl ? (
-        <img
+        <RevealImage
           src={imageUrl}
           alt="Post media"
           className="w-full aspect-[4/3] object-cover"

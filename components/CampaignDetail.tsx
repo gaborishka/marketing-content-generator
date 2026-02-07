@@ -525,7 +525,7 @@ export const CampaignDetail: React.FC<CampaignDetailProps> = ({
 
   const handleAddAttachment = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!campaign || !e.target.files || e.target.files.length === 0) return;
-    const newNames = Array.from(e.target.files).map(f => f.name);
+    const newNames = Array.from(e.target.files).map((f: File) => f.name);
     onUpdateCampaign({ ...campaign, attachments: [...campaign.attachments, ...newNames] });
     e.target.value = '';
   };
