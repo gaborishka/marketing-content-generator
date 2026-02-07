@@ -323,17 +323,17 @@ components/
 
 ### Phase 3: Orchestrator + Cloud Function Entry Points
 
-- [ ] Create `functions/src/agents/orchestrator.ts` — pipeline controller (plan → generate)
-  - [ ] Sequential agent flow: call planner, pass PlannerContext to generator
-  - [ ] Progress updates to job doc at each stage
-  - [ ] Error handling: write partial results, mark job as failed on unrecoverable errors
-  - [ ] Timeout budget management (check remaining time before each stage)
-- [ ] Update `functions/src/index.ts` — add 2 new function exports:
-  - [ ] `generateCampaignContent` (onCall, 30s) — validate input, create job doc, return `{ jobId }`
-  - [ ] `processGenerationJob` (onDocumentCreated on `generationJobs/{jobId}`, 540s) — invoke orchestrator
-- [ ] Keep existing `generateContent`, `generateImage`, `generateVideo` functions for backward compat
-- [ ] Build and deploy: `cd functions && npm run build`
-- [ ] Test with emulator: `firebase emulators:start --only functions,firestore`
+- [x] Create `functions/src/agents/orchestrator.ts` — pipeline controller (plan → generate)
+  - [x] Sequential agent flow: call planner, pass PlannerContext to generator
+  - [x] Progress updates to job doc at each stage
+  - [x] Error handling: write partial results, mark job as failed on unrecoverable errors
+  - [x] Timeout budget management (check remaining time before each stage)
+- [x] Update `functions/src/index.ts` — add 2 new function exports:
+  - [x] `generateCampaignContent` (onCall, 30s) — validate input, create job doc, return `{ jobId }`
+  - [x] `processGenerationJob` (onDocumentCreated on `generationJobs/{jobId}`, 540s) — invoke orchestrator
+- [x] Keep existing `generateContent`, `generateImage`, `generateVideo` functions for backward compat
+- [x] Build and deploy: `cd functions && npm run build`
+- [x] Test with emulator: `firebase emulators:start --only functions,firestore`
 
 ### Phase 4: Compliance Evaluator-Optimizer Loop
 

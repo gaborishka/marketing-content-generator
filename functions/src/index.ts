@@ -1,4 +1,5 @@
 import { onCall, HttpsError } from "firebase-functions/v2/https";
+import { onDocumentCreated } from "firebase-functions/v2/firestore";
 import { defineSecret } from "firebase-functions/params";
 import { GoogleGenAI, Type, VideoGenerationReferenceType } from "@google/genai";
 import { initializeApp } from "firebase-admin/app";
@@ -255,6 +256,93 @@ export const generateVideo = onCall(
       if (error instanceof HttpsError) throw error;
       console.error("generateVideo error:", error);
       throw new HttpsError("internal", error.message || "Video generation failed.");
+    }
+  }
+);
+
+// ── generateCampaignContent ──────────────────────────────────────────────────
+// Quick onCall trigger: validates input, creates a job doc, returns { jobId }.
+// The actual pipeline runs asynchronously via processGenerationJob below.
+
+import { createJobDoc } from "./utils/firestore";
+import { runOrchestrator } from "./agents/orchestrator";
+
+interface GenerateCampaignInput {
+  campaignId: string;
+}
+
+export const generateCampaignContent = onCall(
+  { timeoutSeconds: 30, memory: "256MiB", secrets: [GEMINI_API_KEY], cors: true },
+  async (request) => {
+    if (!request.auth) {
+      throw new HttpsError("unauthenticated", "Authentication required.");
+    }
+
+    const { campaignId } = request.data as GenerateCampaignInput;
+    if (!campaignId || typeof campaignId !== "string") {
+      throw new HttpsError("invalid-argument", "campaignId is required.");
+    }
+
+    const jobId = `job-${randomUUID()}`;
+    const userId = request.auth.uid;
+
+    try {
+      await createJobDoc(jobId, {
+        userId,
+        campaignId,
+        status: "pending",
+        progress: 0,
+        phase: "Queued",
+        contentIds: [],
+        itemsCompleted: 0,
+        itemsTotal: 0,
+        retryCount: 0,
+      });
+
+      return { jobId };
+    } catch (error: any) {
+      console.error("generateCampaignContent error:", error);
+      throw new HttpsError("internal", error.message || "Failed to create generation job.");
+    }
+  }
+);
+
+// ── processGenerationJob ─────────────────────────────────────────────────────
+// Firestore trigger: runs the full agent pipeline when a job doc is created.
+
+export const processGenerationJob = onDocumentCreated(
+  {
+    document: "generationJobs/{jobId}",
+    timeoutSeconds: 540,
+    memory: "1GiB",
+    secrets: [GEMINI_API_KEY],
+  },
+  async (event) => {
+    const snap = event.data;
+    if (!snap) {
+      console.error("processGenerationJob: no snapshot data");
+      return;
+    }
+
+    const data = snap.data();
+    const jobId = event.params.jobId;
+    const campaignId = data.campaignId as string;
+    const userId = data.userId as string;
+
+    if (!campaignId || !userId) {
+      console.error("processGenerationJob: missing campaignId or userId in job doc");
+      return;
+    }
+
+    const result = await runOrchestrator({
+      campaignId,
+      userId,
+      jobId,
+      maxSeconds: 540,
+    });
+
+    if (!result.success) {
+      console.error(`Pipeline failed for job ${jobId}:`, result.error);
     }
   }
 );
