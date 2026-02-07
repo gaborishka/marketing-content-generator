@@ -1,5 +1,6 @@
 import React from 'react';
 import { MessageCircle, Repeat2, Heart, Share, Bookmark, Loader2 } from 'lucide-react';
+import { RevealImage } from '../RevealImage';
 
 export interface PlatformPreviewProps {
   text: string;
@@ -36,7 +37,7 @@ export const TwitterPreview: React.FC<PlatformPreviewProps> = ({ text, imageUrl,
       {/* Image */}
       {imageUrl ? (
         <div className="ml-[42px] mb-2">
-          <img
+          <RevealImage
             src={imageUrl}
             alt="Post media"
             className="w-full aspect-video object-cover rounded-xl border border-slate-200"

@@ -43,7 +43,7 @@ import {
 import { useParams, Link } from 'react-router-dom';
 import { Campaign, Product, GeneratedContent, ComplianceRule, CHANNEL_FORMATS, getParentChannel } from '../types';
 import { CanvasBoard, INITIAL_CANVAS_SCALE } from './CanvasBoard';
-import { generateMarketingContent } from '../services/geminiService';
+import { startGeneration, subscribeToJob, subscribeToContent, JobStatus } from '../services/orchestrationService';
 import { VideoStoryboardModal } from './VideoStoryboardModal';
 import { ContentDetailModal } from './ContentDetailModal';
 import { ContentCreationModal } from './ContentCreationModal';
@@ -113,10 +113,23 @@ export const CampaignDetail: React.FC<CampaignDetailProps> = ({
   } | null>(null);
   const [filters, setFilters] = useState<ContentFilters>(INITIAL_FILTERS);
   const [isFilterPanelOpen, setIsFilterPanelOpen] = useState(false);
+  const [activeJobId, setActiveJobId] = useState<string | null>(null);
+  const [jobStatus, setJobStatus] = useState<JobStatus | null>(null);
   const filterButtonRef = useRef<HTMLButtonElement>(null);
   const filterPanelRef = useRef<HTMLDivElement>(null);
 
+  // Refs to avoid stale closures in Firestore subscription callbacks
+  const contentStoreRef = useRef(contentStore);
+  contentStoreRef.current = contentStore;
+  const onUpdateContentRef = useRef(onUpdateContent);
+  onUpdateContentRef.current = onUpdateContent;
+
   const campaign = campaigns.find(c => c.id === id);
+
+  const campaignRef = useRef(campaign);
+  campaignRef.current = campaign;
+  const onUpdateCampaignRef = useRef(onUpdateCampaign);
+  onUpdateCampaignRef.current = onUpdateCampaign;
   const primaryProduct = products.find(p => p.id === campaign?.primaryProductId);
   const secondaryProducts = products.filter(p => campaign?.secondaryProductIds.includes(p.id));
   const brandName = primaryProduct?.brand || campaign?.name || 'Your Brand';
@@ -220,6 +233,123 @@ export const CampaignDetail: React.FC<CampaignDetailProps> = ({
     };
   }, [isFilterPanelOpen]);
 
+  // ── Job subscription: track pipeline progress in real time ───────────────
+  useEffect(() => {
+    if (!activeJobId) return;
+
+    const unsub = subscribeToJob(activeJobId, (job) => {
+      setJobStatus(job);
+
+      if (job.status === 'completed') {
+        setIsGenerating(false);
+        setStatusMessage(null);
+        setActiveJobId(null);
+        setJobStatus(null);
+        // Remove any remaining placeholder cards
+        const currentStore = contentStoreRef.current;
+        if (currentStore.some(c => c.id.startsWith('placeholder-'))) {
+          onUpdateContentRef.current(currentStore.filter(c => !c.id.startsWith('placeholder-')));
+        }
+        // Update campaign status after successful generation
+        const currentCampaign = campaignRef.current;
+        if (currentCampaign && currentCampaign.status === 'draft') {
+          onUpdateCampaignRef.current({ ...currentCampaign, status: 'review', progress: 50 });
+        }
+      } else if (job.status === 'failed') {
+        setIsGenerating(false);
+        setStatusMessage(job.error || 'Generation failed. Please try again.');
+        setActiveJobId(null);
+        setJobStatus(null);
+        // Remove placeholder cards on failure
+        const currentStore = contentStoreRef.current;
+        if (currentStore.some(c => c.id.startsWith('placeholder-'))) {
+          onUpdateContentRef.current(currentStore.filter(c => !c.id.startsWith('placeholder-')));
+        }
+      }
+    });
+
+    return unsub;
+  }, [activeJobId]);
+
+  // ── Content subscription: stream generated content from Firestore ────────
+  useEffect(() => {
+    if (!activeJobId || !campaign) return;
+
+    const unsub = subscribeToContent(campaign.id, (firestoreContent) => {
+      // Merge Firestore-generated content into the content store.
+      // Only include items from the active generation job.
+      const jobContent = firestoreContent.filter(
+        (c) => c.generationJobId === activeJobId
+      );
+
+      if (jobContent.length === 0) return;
+
+      // Use refs to get latest values, avoiding stale closures
+      const currentContentStore = contentStoreRef.current;
+      const currentCampaign = campaignRef.current;
+
+      // Assign canvas positions to new items that don't have them yet.
+      // Exclude current job items from startX calculation to prevent drift on re-snapshots.
+      const currentJobIds = new Set(jobContent.map(c => c.id));
+      const existingContent = currentContentStore.filter(c => c.campaignId === currentCampaign?.id && !currentJobIds.has(c.id));
+      let startX = 50;
+      if (existingContent.length > 0) {
+        const maxX = Math.max(...existingContent.map(c => c.x));
+        startX = maxX + 400;
+      }
+
+      // Match generated content to placeholders by (channel, audience) to inherit positions.
+      // Track which placeholders have already been claimed so each is used at most once.
+      const placeholders = currentContentStore.filter(c => c.id.startsWith('placeholder-'));
+      const claimedPlaceholderIds = new Set<string>();
+
+      const positioned = jobContent.map((item, idx) => {
+        // First: check if this exact item already exists in local store (re-snapshot)
+        const existingById = currentContentStore.find(c => c.id === item.id);
+        if (existingById) {
+          return {
+            ...item,
+            x: existingById.x,
+            y: existingById.y,
+            width: existingById.width || item.width || 320,
+          };
+        }
+
+        // Second: match to an unclaimed placeholder by (channel, audience) tuple
+        const matchedPlaceholder = placeholders.find(
+          p => p.channel === item.channel && p.audience === item.audience && !claimedPlaceholderIds.has(p.id)
+        );
+        if (matchedPlaceholder) {
+          claimedPlaceholderIds.add(matchedPlaceholder.id);
+          return {
+            ...item,
+            x: matchedPlaceholder.x,
+            y: matchedPlaceholder.y,
+            width: matchedPlaceholder.width || item.width || 320,
+          };
+        }
+
+        // Fallback: assign a grid position for items with no matching placeholder
+        return {
+          ...item,
+          x: startX + (Math.floor(idx / 2) * 340),
+          y: 100 + ((idx % 2) * 450),
+          width: item.width || 320,
+        };
+      });
+
+      // Merge: keep non-job content, replace job content with latest from Firestore.
+      // Also remove placeholder cards since real content has arrived.
+      const jobIds = new Set(positioned.map(c => c.id));
+      const otherContent = currentContentStore.filter(
+        c => !jobIds.has(c.id) && !c.id.startsWith('placeholder-')
+      );
+      onUpdateContentRef.current([...otherContent, ...positioned]);
+    });
+
+    return unsub;
+  }, [activeJobId, campaign?.id]);
+
   // Generate button validation
   const canGenerate = campaign ? campaign.targetAudiences.length > 0 && campaign.channels.length > 0 : false;
 
@@ -247,157 +377,59 @@ export const CampaignDetail: React.FC<CampaignDetailProps> = ({
   };
 
   const handleGenerateMore = async () => {
-    if (!campaign) return;
+    if (!campaign || isGenerating) return;
 
     setIsGenerating(true);
     setStatusMessage(null);
+    setJobStatus(null);
 
+    // Create placeholder cards so the user sees immediate visual feedback
+    const existingContent = contentStore.filter(c => c.campaignId === campaign.id);
     let startX = 50;
-    if (campaignContent.length > 0) {
-      const maxX = Math.max(...campaignContent.map(c => c.x));
+    if (existingContent.length > 0) {
+      const maxX = Math.max(...existingContent.map(c => c.x));
       startX = maxX + 400;
     }
 
-    const newPlaceholders: GeneratedContent[] = [];
-    let index = 0;
-
-    // Build channel × audience combinations (channels are already sub-format names)
-    const combinations: { channel: string; audience: string }[] = [];
-    for (const channel of campaign.channels) {
-      for (const audience of campaign.targetAudiences) {
-        combinations.push({ channel, audience });
+    const placeholders: GeneratedContent[] = [];
+    let idx = 0;
+    for (const aud of campaign.targetAudiences) {
+      for (const ch of campaign.channels) {
+        placeholders.push({
+          id: `placeholder-${Date.now()}-${idx}`,
+          campaignId: campaign.id,
+          channel: ch,
+          audience: aud,
+          text: '',
+          imageUrl: '',
+          complianceScore: 0,
+          status: 'generating',
+          riskLevel: 'low',
+          x: startX + (Math.floor(idx / 2) * 340),
+          y: 100 + ((idx % 2) * 450),
+          width: 320,
+        });
+        idx++;
       }
     }
-
-    // Cap at 6 to match AI generation limit
-    for (const { channel, audience } of combinations.slice(0, 6)) {
-         const exists = campaignContent.some(c => c.channel === channel && c.audience === audience);
-         if (exists) continue;
-
-         newPlaceholders.push({
-           id: `temp-${Date.now()}-${index}`,
-           campaignId: campaign.id,
-           channel,
-           audience,
-           text: '',
-           complianceScore: 0,
-           riskLevel: 'low',
-           status: 'generating',
-           imageUrl: '',
-           x: startX + (Math.floor(index / 2) * 340),
-           y: 100 + ((index % 2) * 450),
-           width: 320
-         });
-         index++;
-    }
-
-    if (newPlaceholders.length === 0) {
-       setStatusMessage("All combinations covered. Generating alternatives...");
-       const audience = campaign.targetAudiences[0] || 'General Public';
-       for (const channel of campaign.channels.slice(0, 3)) {
-           newPlaceholders.push({
-             id: `temp-${Date.now()}-${index}`,
-             campaignId: campaign.id,
-             channel,
-             audience,
-             text: '',
-             complianceScore: 0,
-             riskLevel: 'low',
-             status: 'generating',
-             imageUrl: '',
-             x: startX + (Math.floor(index / 2) * 340),
-             y: 100 + ((index % 2) * 450),
-             width: 320
-           });
-           index++;
-       }
-    } else {
-       setStatusMessage(`Generating ${newPlaceholders.length} missing variants...`);
-    }
-
-    if (newPlaceholders.length === 0) {
-      setIsGenerating(false);
-      setStatusMessage("No channels defined to generate content for.");
-      return;
-    }
-
-    onUpdateContent([...contentStore, ...newPlaceholders]);
-
-    if (newPlaceholders.length > 0) {
-      const avgX = newPlaceholders.reduce((sum, p) => sum + p.x, 0) / newPlaceholders.length + 160;
-      const avgY = newPlaceholders.reduce((sum, p) => sum + p.y, 0) / newPlaceholders.length + 200;
+    if (placeholders.length > 0) {
+      onUpdateContent([...contentStore, ...placeholders]);
+      // Pan the canvas to show the new placeholder cards
+      const avgX = placeholders.reduce((sum, p) => sum + p.x, 0) / placeholders.length + 160;
+      const avgY = placeholders.reduce((sum, p) => sum + p.y, 0) / placeholders.length + 200;
       setCanvasFocusTarget({ x: avgX, y: avgY, timestamp: Date.now() });
     }
 
     try {
-      const results = await generateMarketingContent(
-        campaign,
-        products,
-        complianceRule,
-        (updatedContentItem) => {
-          onUpdateItem(updatedContentItem);
-        }
-      );
-
-      const filledPlaceholders: GeneratedContent[] = [];
-      const usedResultsIndices = new Set<number>();
-
-      newPlaceholders.forEach(placeholder => {
-        const resultIndex = results.findIndex((r, idx) =>
-          r.channel === placeholder.channel &&
-          r.audience === placeholder.audience &&
-          !usedResultsIndices.has(idx)
-        );
-
-        if (resultIndex !== -1) {
-          usedResultsIndices.add(resultIndex);
-          const match = results[resultIndex];
-          filledPlaceholders.push({
-            ...match,
-            x: placeholder.x,
-            y: placeholder.y,
-            width: placeholder.width,
-            id: match.id
-          });
-        } else {
-           const anyResultIndex = results.findIndex((r, idx) => !usedResultsIndices.has(idx));
-           if (anyResultIndex !== -1) {
-              usedResultsIndices.add(anyResultIndex);
-              const match = results[anyResultIndex];
-               filledPlaceholders.push({
-                ...match,
-                x: placeholder.x,
-                y: placeholder.y,
-                width: placeholder.width,
-                id: match.id
-              });
-           } else {
-              filledPlaceholders.push({
-                ...placeholder,
-                status: 'draft',
-                text: 'Content generation unavailable for this variant.',
-                complianceScore: 0
-             } as GeneratedContent);
-           }
-        }
-      });
-
-      const placeholderIds = newPlaceholders.map(p => p.id);
-      const contentKeep = contentStore.filter(c => !placeholderIds.includes(c.id));
-      onUpdateContent([...contentKeep, ...filledPlaceholders]);
-
-      // Update campaign status after successful generation
-      if (campaign.status === 'draft') {
-        onUpdateCampaign({ ...campaign, status: 'review', progress: 50 });
-      }
-
+      const jobId = await startGeneration(campaign.id);
+      setActiveJobId(jobId);
+      setStatusMessage('Pipeline started. Waiting for updates...');
     } catch (error) {
-      console.error("Failed to generate content:", error);
-      const placeholderIds = newPlaceholders.map(p => p.id);
-      onUpdateContent(contentStore.filter(c => !placeholderIds.includes(c.id)));
-      setStatusMessage("Generation failed. Please try again.");
-    } finally {
+      console.error('Failed to start generation:', error);
       setIsGenerating(false);
+      setStatusMessage('Generation failed. Please try again.');
+      // Remove placeholders on failure
+      onUpdateContent(contentStore.filter(c => !c.id.startsWith('placeholder-')));
     }
   };
 
@@ -493,7 +525,7 @@ export const CampaignDetail: React.FC<CampaignDetailProps> = ({
 
   const handleAddAttachment = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!campaign || !e.target.files || e.target.files.length === 0) return;
-    const newNames = Array.from(e.target.files).map(f => f.name);
+    const newNames = Array.from(e.target.files).map((f: File) => f.name);
     onUpdateCampaign({ ...campaign, attachments: [...campaign.attachments, ...newNames] });
     e.target.value = '';
   };
@@ -906,7 +938,28 @@ export const CampaignDetail: React.FC<CampaignDetailProps> = ({
            </div>
 
            <div className="p-4 mt-auto">
-             {statusMessage && (
+             {/* Pipeline progress */}
+             {jobStatus && isGenerating && (
+               <div className="mb-3 space-y-1.5">
+                 <div className="flex items-center justify-between text-xs">
+                   <span className="text-slate-600 font-medium">{jobStatus.phase}</span>
+                   <span className="text-slate-400">{jobStatus.progress}%</span>
+                 </div>
+                 <div className="w-full bg-slate-200 rounded-full h-1.5 overflow-hidden">
+                   <div
+                     className="bg-blue-600 h-1.5 rounded-full transition-all duration-500 ease-out"
+                     style={{ width: `${jobStatus.progress}%` }}
+                   />
+                 </div>
+                 {jobStatus.itemsTotal > 0 && (
+                   <div className="text-[10px] text-slate-400">
+                     {jobStatus.itemsCompleted}/{jobStatus.itemsTotal} items
+                     {jobStatus.retryCount > 0 && ` | ${jobStatus.retryCount} compliance retries`}
+                   </div>
+                 )}
+               </div>
+             )}
+             {statusMessage && !jobStatus && (
                <div className="mb-2 p-2 bg-blue-50 text-blue-700 text-xs rounded border border-blue-100 flex items-start animate-fadeIn">
                  <Info size={14} className="mr-1.5 mt-0.5 shrink-0" />
                  <span>{statusMessage}</span>

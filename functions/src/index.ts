@@ -1,5 +1,5 @@
 import { onCall, HttpsError } from "firebase-functions/v2/https";
-import { defineSecret } from "firebase-functions/params";
+import { onDocumentCreated } from "firebase-functions/v2/firestore";
 import { GoogleGenAI, Type, VideoGenerationReferenceType } from "@google/genai";
 import { initializeApp } from "firebase-admin/app";
 import { getStorage } from "firebase-admin/storage";
@@ -7,6 +7,7 @@ import { randomUUID } from "crypto";
 import { join } from "path";
 import { readFile, unlink } from "fs/promises";
 import { tmpdir } from "os";
+import { GEMINI_API_KEY } from "./utils/gemini";
 
 initializeApp();
 
@@ -37,8 +38,6 @@ interface GenerateVideoInput {
   prompt?: string;
   contentId: string;
 }
-
-const GEMINI_API_KEY = defineSecret("GEMINI_API_KEY");
 
 const getAiClient = () => new GoogleGenAI({ apiKey: GEMINI_API_KEY.value() });
 
@@ -131,6 +130,11 @@ export const generateImage = onCall(
 
 const MAX_IMAGE_SIZE = 10 * 1024 * 1024; // 10 MB
 
+const ALLOWED_IMAGE_HOSTS = [
+  "firebasestorage.googleapis.com",
+  "storage.googleapis.com",
+];
+
 const resolveReferenceImage = async (entry: ReferenceImageEntry) => {
   // Already has inline bytes — pass through
   if (entry.image?.imageBytes) return entry;
@@ -140,7 +144,21 @@ const resolveReferenceImage = async (entry: ReferenceImageEntry) => {
     throw new HttpsError("invalid-argument", "Reference image must have image.imageBytes or imageUrl.");
   }
 
-  const res = await fetch(url);
+  // Validate URL: only allow HTTPS to known hosts (prevent SSRF)
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    throw new HttpsError("invalid-argument", "Invalid image URL.");
+  }
+  if (parsed.protocol !== "https:") {
+    throw new HttpsError("invalid-argument", "Image URL must use HTTPS.");
+  }
+  if (!ALLOWED_IMAGE_HOSTS.some((host) => parsed.hostname === host || parsed.hostname.endsWith(`.${host}`))) {
+    throw new HttpsError("invalid-argument", `Image URL host not allowed: ${parsed.hostname}`);
+  }
+
+  const res = await fetch(url, { redirect: "error" });
   if (!res.ok) {
     throw new HttpsError("internal", `Failed to fetch reference image: ${res.statusText}`);
   }
@@ -255,6 +273,110 @@ export const generateVideo = onCall(
       if (error instanceof HttpsError) throw error;
       console.error("generateVideo error:", error);
       throw new HttpsError("internal", error.message || "Video generation failed.");
+    }
+  }
+);
+
+// ── generateCampaignContent ──────────────────────────────────────────────────
+// Quick onCall trigger: validates input, creates a job doc, returns { jobId }.
+// The actual pipeline runs asynchronously via processGenerationJob below.
+
+import { createJobIfNoActive, updateJobDoc } from "./utils/firestore";
+import { runOrchestrator } from "./agents/orchestrator";
+
+interface GenerateCampaignInput {
+  campaignId: string;
+}
+
+export const generateCampaignContent = onCall(
+  { timeoutSeconds: 30, memory: "256MiB", cors: true },
+  async (request) => {
+    if (!request.auth) {
+      throw new HttpsError("unauthenticated", "Authentication required.");
+    }
+
+    const { campaignId } = request.data as GenerateCampaignInput;
+    if (!campaignId || typeof campaignId !== "string") {
+      throw new HttpsError("invalid-argument", "campaignId is required.");
+    }
+
+    const jobId = `job-${randomUUID()}`;
+    const userId = request.auth.uid;
+
+    try {
+      // Atomically check for active jobs and create in a single transaction
+      await createJobIfNoActive(jobId, {
+        userId,
+        campaignId,
+        status: "pending",
+        progress: 0,
+        phase: "Queued",
+        contentIds: [],
+        itemsCompleted: 0,
+        itemsTotal: 0,
+        retryCount: 0,
+      });
+
+      return { jobId };
+    } catch (error: any) {
+      if (error.message === "ACTIVE_JOB_EXISTS") {
+        throw new HttpsError("already-exists", "A generation job is already running for this campaign.");
+      }
+      console.error("generateCampaignContent error:", error);
+      throw new HttpsError("internal", error.message || "Failed to create generation job.");
+    }
+  }
+);
+
+// ── processGenerationJob ─────────────────────────────────────────────────────
+// Firestore trigger: runs the full agent pipeline when a job doc is created.
+
+export const processGenerationJob = onDocumentCreated(
+  {
+    document: "generationJobs/{jobId}",
+    timeoutSeconds: 540,
+    memory: "1GiB",
+    secrets: [GEMINI_API_KEY],
+  },
+  async (event) => {
+    const snap = event.data;
+    const jobId = event.params.jobId;
+
+    if (!snap) {
+      console.error("processGenerationJob: no snapshot data");
+      try { await updateJobDoc(jobId, { status: "failed", phase: "Failed", error: "No snapshot data" }); } catch {}
+      return;
+    }
+
+    const data = snap.data();
+    const campaignId = data.campaignId as string;
+    const userId = data.userId as string;
+
+    if (!campaignId || !userId) {
+      console.error("processGenerationJob: missing campaignId or userId in job doc");
+      try { await updateJobDoc(jobId, { status: "failed", phase: "Failed", error: "Missing campaignId or userId" }); } catch {}
+      return;
+    }
+
+    try {
+      const result = await runOrchestrator({
+        campaignId,
+        userId,
+        jobId,
+        maxSeconds: 540,
+      });
+
+      if (!result.success) {
+        console.error(`Pipeline failed for job ${jobId}:`, result.error);
+      }
+    } catch (error: any) {
+      console.error(`Unhandled pipeline error for job ${jobId}:`, error);
+      try {
+        await updateJobDoc(jobId, { status: "failed", phase: "Failed", error: "Content generation failed. Please try again." });
+      } catch {
+        console.error(`Failed to mark job ${jobId} as failed after unhandled error`);
+      }
+      // Note: clearJobLock is handled by the orchestrator's finally block
     }
   }
 );

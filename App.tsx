@@ -255,7 +255,7 @@ function App() {
     let removedIds: string[] = [];
 
     setContentStore(prev => {
-      const prevMap = new Map(prev.map(c => [c.id, c]));
+      const prevMap = new Map<string, GeneratedContent>(prev.map(c => [c.id, c]));
       mergedList = newContentList.map(item => {
         const existing = prevMap.get(item.id);
         if (existing) {

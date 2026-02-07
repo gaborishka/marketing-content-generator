@@ -85,6 +85,15 @@ export interface GeneratedContent {
   storyboard?: Scene[];
   videoUrl?: string;
   videoStatus?: 'idle' | 'generating' | 'completed' | 'failed';
+  // Pipeline extensions
+  generationJobId?: string;
+  complianceDetails?: {
+    score: number;
+    violations: string[];
+    suggestions: string[];
+    suggestedFix?: string;
+    retryAttempt: number;
+  };
 }
 
 // Analytics
