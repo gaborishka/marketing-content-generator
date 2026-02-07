@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "concurrently --names emu,vite --prefix-colors blue,green \"npm run emulators\" \"VITE_USE_EMULATORS=true vite\"",
     "dev:vite": "vite",
-    "emulators": "cd functions && npm run build && cd .. && npx firebase emulators:start --only functions",
+    "emulators": "cd functions && npm run build && cd .. && npx firebase emulators:start --only functions,firestore",
     "build": "vite build",
     "preview": "vite preview",
     "test": "vitest run",

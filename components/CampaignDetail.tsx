@@ -245,6 +245,11 @@ export const CampaignDetail: React.FC<CampaignDetailProps> = ({
         setStatusMessage(null);
         setActiveJobId(null);
         setJobStatus(null);
+        // Remove any remaining placeholder cards
+        const currentStore = contentStoreRef.current;
+        if (currentStore.some(c => c.id.startsWith('placeholder-'))) {
+          onUpdateContentRef.current(currentStore.filter(c => !c.id.startsWith('placeholder-')));
+        }
         // Update campaign status after successful generation
         const currentCampaign = campaignRef.current;
         if (currentCampaign && currentCampaign.status === 'draft') {
@@ -255,6 +260,11 @@ export const CampaignDetail: React.FC<CampaignDetailProps> = ({
         setStatusMessage(job.error || 'Generation failed. Please try again.');
         setActiveJobId(null);
         setJobStatus(null);
+        // Remove placeholder cards on failure
+        const currentStore = contentStoreRef.current;
+        if (currentStore.some(c => c.id.startsWith('placeholder-'))) {
+          onUpdateContentRef.current(currentStore.filter(c => !c.id.startsWith('placeholder-')));
+        }
       }
     });
 
@@ -302,9 +312,12 @@ export const CampaignDetail: React.FC<CampaignDetailProps> = ({
         };
       });
 
-      // Merge: keep non-job content, replace job content with latest from Firestore
+      // Merge: keep non-job content, replace job content with latest from Firestore.
+      // Also remove placeholder cards since real content has arrived.
       const jobIds = new Set(positioned.map(c => c.id));
-      const otherContent = currentContentStore.filter(c => !jobIds.has(c.id));
+      const otherContent = currentContentStore.filter(
+        c => !jobIds.has(c.id) && !c.id.startsWith('placeholder-')
+      );
       onUpdateContentRef.current([...otherContent, ...positioned]);
     });
 
@@ -344,6 +357,39 @@ export const CampaignDetail: React.FC<CampaignDetailProps> = ({
     setStatusMessage(null);
     setJobStatus(null);
 
+    // Create placeholder cards so the user sees immediate visual feedback
+    const existingContent = contentStore.filter(c => c.campaignId === campaign.id);
+    let startX = 50;
+    if (existingContent.length > 0) {
+      const maxX = Math.max(...existingContent.map(c => c.x));
+      startX = maxX + 400;
+    }
+
+    const placeholders: GeneratedContent[] = [];
+    let idx = 0;
+    for (const aud of campaign.targetAudiences) {
+      for (const ch of campaign.channels) {
+        placeholders.push({
+          id: `placeholder-${Date.now()}-${idx}`,
+          campaignId: campaign.id,
+          channel: ch,
+          audience: aud,
+          text: '',
+          imageUrl: '',
+          complianceScore: 0,
+          status: 'generating',
+          riskLevel: 'low',
+          x: startX + (Math.floor(idx / 2) * 340),
+          y: 100 + ((idx % 2) * 450),
+          width: 320,
+        });
+        idx++;
+      }
+    }
+    if (placeholders.length > 0) {
+      onUpdateContent([...contentStore, ...placeholders]);
+    }
+
     try {
       const jobId = await startGeneration(campaign.id);
       setActiveJobId(jobId);
@@ -352,6 +398,8 @@ export const CampaignDetail: React.FC<CampaignDetailProps> = ({
       console.error('Failed to start generation:', error);
       setIsGenerating(false);
       setStatusMessage('Generation failed. Please try again.');
+      // Remove placeholders on failure
+      onUpdateContent(contentStore.filter(c => !c.id.startsWith('placeholder-')));
     }
   };
 

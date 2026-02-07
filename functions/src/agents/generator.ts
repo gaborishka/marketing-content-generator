@@ -98,8 +98,8 @@ export async function generateText(
         riskLevel: item.riskLevel,
         x: 0,
         y: 0,
-        storyboard,
         generationJobId: jobId,
+        ...(storyboard ? { storyboard } : {}),
       };
 
       await writeContentDoc(doc);
