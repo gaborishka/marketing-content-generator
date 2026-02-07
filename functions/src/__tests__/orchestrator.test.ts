@@ -702,3 +702,75 @@ describe("runOrchestrator - asset manager", () => {
     );
   });
 });
+
+// ── Error Recovery: Gemini API failure → job marked as failed ────────────
+
+describe("runOrchestrator - error recovery", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("marks job as failed with error message when Gemini API throws", async () => {
+    mockRunPlanner.mockResolvedValue({ success: true, data: plannerContext });
+    mockGenerateText.mockRejectedValue(
+      new Error("429 Resource exhausted: Gemini API rate limit exceeded")
+    );
+
+    const result = await runOrchestrator(baseInput);
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("429 Resource exhausted");
+    expect(mockFail).toHaveBeenCalledWith(
+      expect.stringContaining("429 Resource exhausted")
+    );
+    expect(mockComplete).not.toHaveBeenCalled();
+  });
+
+  it("marks job as failed when Firestore read throws during planning", async () => {
+    mockRunPlanner.mockRejectedValue(
+      new Error("PERMISSION_DENIED: Missing or insufficient permissions")
+    );
+
+    const result = await runOrchestrator(baseInput);
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("PERMISSION_DENIED");
+    expect(mockFail).toHaveBeenCalledWith(
+      expect.stringContaining("PERMISSION_DENIED")
+    );
+  });
+});
+
+// ── Timeout: image phase skipped when <120s remains ──────────────────────
+
+describe("runOrchestrator - timeout budget", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("skips image generation when budget has less than 120s remaining", async () => {
+    // 60s total minus 30s safety margin = 30s effective budget
+    // After planning + generation, well under 120s remains
+    const tightBudget: OrchestratorInput = {
+      ...baseInput,
+      maxSeconds: 60,
+    };
+
+    mockRunPlanner.mockResolvedValue({ success: true, data: plannerContext });
+    mockGenerateText.mockResolvedValue({ success: true, data: contentDocs });
+
+    const result = await runOrchestrator(tightBudget);
+
+    expect(result.success).toBe(true);
+    expect(result.contentIds).toEqual(["gen-job-1-1", "gen-job-1-2"]);
+    // Asset manager never called
+    expect(mockRunAssetManager).not.toHaveBeenCalled();
+    // But job still completes successfully with content IDs
+    expect(mockComplete).toHaveBeenCalledWith(["gen-job-1-1", "gen-job-1-2"]);
+    // No "generating_images" phase was set
+    const imagePhaseCall = mockSetPhase.mock.calls.find(
+      (call: any[]) => call[0] === "generating_images"
+    );
+    expect(imagePhaseCall).toBeUndefined();
+  });
+});

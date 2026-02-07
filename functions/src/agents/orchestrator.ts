@@ -1,5 +1,23 @@
 // Orchestrator: pipeline controller that runs agents in sequence.
 // Pure code — no LLM calls. Deterministic flow: Planner → Generator → Compliance → (retry?) → Asset Manager.
+//
+// Agent Registry Pattern (for future agents):
+//
+// Each agent follows a consistent contract:
+//   - Input:  typed context specific to the agent's role (minimal, focused)
+//   - Output: AgentResult<T> — { success: boolean, data?: T, error?: string }
+//   - Side effects: writes to Firestore (content docs, compliance details, etc.)
+//
+// To add a new agent (e.g., A/B testing, localization, tone adjustment):
+//   1. Create `functions/src/agents/<agentName>.ts` with a `run<AgentName>()` function
+//   2. Define input/output types in `functions/src/types/pipeline.ts`
+//   3. If the agent uses LLM, add prompt template in `functions/src/prompts/<agentName>.prompt.ts`
+//   4. Wire into this orchestrator at the appropriate pipeline stage
+//   5. Add progress phase updates for real-time frontend feedback
+//   6. Add tests in `functions/src/__tests__/<agentName>.test.ts`
+//
+// Agents are pure functions — no shared mutable state. The orchestrator passes
+// typed results between them and manages the pipeline lifecycle.
 
 import { ProgressWriter } from "../utils/progress";
 import { TimeoutBudget } from "../utils/timeout";

@@ -389,13 +389,13 @@ components/
 
 ### Phase 7: Cleanup + Future-Proofing
 
-- [ ] Simplify `services/geminiService.ts` — remove `generateMarketingContent` + `mockGeneration` (keep `generateVideoFromStoryboard`)
-- [ ] Remove `onImageUpdate` callback pattern from frontend
-- [ ] Add Firestore composite index for `content` queries by `campaignId` + `userId`
-- [ ] Add Firestore composite index for `generationJobs` queries by `campaignId` + `userId`
-- [ ] Test error recovery: simulate Gemini API failure → verify job marked as failed with error
-- [ ] Test timeout: generate with many items → verify image phase skipped if <120s remains
-- [ ] Document agent registry pattern for future agents (A/B testing, localization, tone adjustment)
+- [x] Simplify `services/geminiService.ts` — remove `generateMarketingContent` + `mockGeneration` (keep `generateVideoFromStoryboard`)
+- [x] Remove `onImageUpdate` callback pattern from frontend
+- [x] Add Firestore composite index for `content` queries by `campaignId` + `userId`
+- [x] Add Firestore composite index for `generationJobs` queries by `campaignId` + `userId`
+- [x] Test error recovery: simulate Gemini API failure → verify job marked as failed with error
+- [x] Test timeout: generate with many items → verify image phase skipped if <120s remains
+- [x] Document agent registry pattern for future agents (A/B testing, localization, tone adjustment)
 
 ---
 
