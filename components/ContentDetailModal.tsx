@@ -25,6 +25,19 @@ interface ContentDetailModalProps {
   onSave: (updated: GeneratedContent) => void;
 }
 
+const CHANNEL_ASPECT_CLASS: Record<string, string> = {
+  'Instagram Post': 'aspect-square',
+  'Instagram Carousel': 'aspect-square',
+  'Instagram Story': 'aspect-[9/16]',
+  'Instagram Reel': 'aspect-[9/16]',
+  'LinkedIn Post': 'aspect-[4/3]',
+  'Facebook Post': 'aspect-[4/3]',
+  'Facebook Ad': 'aspect-square',
+  'Pinterest Pin': 'aspect-[3/4]',
+  'TikTok Video': 'aspect-[9/16]',
+  'YouTube Short': 'aspect-[9/16]',
+};
+
 const CHANNEL_CONFIG: Record<string, { icon: React.ElementType; color: string; bg: string }> = {
   'Email': { icon: Mail, color: 'text-blue-600', bg: 'bg-blue-50' },
   'LinkedIn': { icon: Linkedin, color: 'text-sky-700', bg: 'bg-sky-50' },
@@ -110,7 +123,7 @@ export const ContentDetailModal: React.FC<ContentDetailModalProps> = ({ content,
               <img
                 src={content.imageUrl}
                 alt="Content asset"
-                className="w-full max-h-64 object-cover"
+                className={`w-full object-cover ${CHANNEL_ASPECT_CLASS[content.channel] || 'aspect-video'}`}
               />
             </div>
           )}
