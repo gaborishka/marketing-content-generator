@@ -252,6 +252,7 @@ function App() {
   const handleContentStoreUpdate = (newContentList: GeneratedContent[]) => {
     // Capture the merged list so persistence/uploads use merged data (not stale input)
     let mergedList: GeneratedContent[] = [];
+    let removedIds: string[] = [];
 
     setContentStore(prev => {
       const prevMap = new Map(prev.map(c => [c.id, c]));
@@ -269,8 +270,19 @@ function App() {
         }
         return item;
       });
+
+      // Detect items removed from the list
+      const newIds = new Set(mergedList.map(c => c.id));
+      removedIds = prev.filter(c => !newIds.has(c.id)).map(c => c.id);
+
       return mergedList;
     });
+
+    // Delete removed items from Firestore (and cancel any pending debounced writes)
+    for (const id of removedIds) {
+      storage.cancelDebouncedPut('content', id);
+      storage.deleteItem('content', id);
+    }
 
     // Use merged data for uploads & persistence (updater runs synchronously)
     for (const item of mergedList) {
