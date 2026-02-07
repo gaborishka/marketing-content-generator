@@ -18,18 +18,25 @@ interface CanvasBoardProps {
   onDoubleClick?: (id: string) => void;
   onCanvasDoubleClick?: (canvasPos: { x: number; y: number }) => void;
   onPasteOnCanvas?: (canvasPos: { x: number; y: number }, text?: string, imageDataUrl?: string) => void;
+  pasteEnabled?: boolean;
   brandName?: string;
   focusTarget?: { x: number; y: number; timestamp: number } | null;
 }
 
 const noopDelete = () => {};
 
-export const CanvasBoard: React.FC<CanvasBoardProps> = ({ items, onItemsChange, onEdit, onDoubleClick, onCanvasDoubleClick, onPasteOnCanvas, brandName, focusTarget }) => {
+export const CanvasBoard: React.FC<CanvasBoardProps> = ({ items, onItemsChange, onEdit, onDoubleClick, onCanvasDoubleClick, onPasteOnCanvas, pasteEnabled = true, brandName, focusTarget }) => {
   const containerRef = useRef<HTMLDivElement>(null);
-  
+
   // Viewport State
   const [scale, setScale] = useState(0.8); // Start slightly zoomed out
   const [offset, setOffset] = useState({ x: 0, y: 0 });
+
+  // Refs for paste handler to avoid re-registering on every pan/zoom
+  const offsetRef = useRef(offset);
+  const scaleRef = useRef(scale);
+  useEffect(() => { offsetRef.current = offset; }, [offset]);
+  useEffect(() => { scaleRef.current = scale; }, [scale]);
   
   // Interaction State
   const [isPanning, setIsPanning] = useState(false);
@@ -153,19 +160,33 @@ export const CanvasBoard: React.FC<CanvasBoardProps> = ({ items, onItemsChange, 
   }, []);
 
   // Paste event handler — opens creation modal with pasted text or image
+  // Uses refs for offset/scale to avoid re-registering on every pan/zoom
+  const onPasteRef = useRef(onPasteOnCanvas);
+  useEffect(() => { onPasteRef.current = onPasteOnCanvas; }, [onPasteOnCanvas]);
+
+  const pasteEnabledRef = useRef(pasteEnabled);
+  useEffect(() => { pasteEnabledRef.current = pasteEnabled; }, [pasteEnabled]);
+
   useEffect(() => {
     const el = containerRef.current;
-    if (!el || !onPasteOnCanvas) return;
+    if (!el) return;
+
+    const screenToCanvasFromRefs = (clientX: number, clientY: number) => {
+      const rect = el.getBoundingClientRect();
+      return {
+        x: (clientX - rect.left - offsetRef.current.x) / scaleRef.current,
+        y: (clientY - rect.top - offsetRef.current.y) / scaleRef.current,
+      };
+    };
 
     const handlePaste = (e: ClipboardEvent) => {
-      // Don't intercept paste when user is typing in an input/textarea
+      if (!onPasteRef.current || !pasteEnabledRef.current) return;
+
+      // Don't intercept paste when user is typing in an input/textarea/contentEditable
       const active = document.activeElement;
-      if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || (active as HTMLElement).isContentEditable)) {
+      if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.tagName === 'SELECT' || (active as HTMLElement).isContentEditable)) {
         return;
       }
-
-      let pastedText: string | undefined;
-      let pastedImageDataUrl: string | undefined;
 
       // Check for image in clipboard
       const items = e.clipboardData?.items;
@@ -176,11 +197,12 @@ export const CanvasBoard: React.FC<CanvasBoardProps> = ({ items, onItemsChange, 
             if (blob) {
               const reader = new FileReader();
               reader.onload = () => {
-                const canvasCenter = screenToCanvas(
-                  el.getBoundingClientRect().left + el.getBoundingClientRect().width / 2,
-                  el.getBoundingClientRect().top + el.getBoundingClientRect().height / 2
+                const rect = el.getBoundingClientRect();
+                const canvasCenter = screenToCanvasFromRefs(
+                  rect.left + rect.width / 2,
+                  rect.top + rect.height / 2
                 );
-                onPasteOnCanvas(canvasCenter, undefined, reader.result as string);
+                onPasteRef.current?.(canvasCenter, undefined, reader.result as string);
               };
               reader.readAsDataURL(blob);
               e.preventDefault();
@@ -191,20 +213,21 @@ export const CanvasBoard: React.FC<CanvasBoardProps> = ({ items, onItemsChange, 
       }
 
       // Check for text
-      pastedText = e.clipboardData?.getData('text/plain');
+      const pastedText = e.clipboardData?.getData('text/plain');
       if (pastedText && pastedText.trim()) {
-        const canvasCenter = screenToCanvas(
-          el.getBoundingClientRect().left + el.getBoundingClientRect().width / 2,
-          el.getBoundingClientRect().top + el.getBoundingClientRect().height / 2
+        const rect = el.getBoundingClientRect();
+        const canvasCenter = screenToCanvasFromRefs(
+          rect.left + rect.width / 2,
+          rect.top + rect.height / 2
         );
-        onPasteOnCanvas(canvasCenter, pastedText.trim(), undefined);
+        onPasteRef.current(canvasCenter, pastedText.trim(), undefined);
         e.preventDefault();
       }
     };
 
     document.addEventListener('paste', handlePaste);
     return () => document.removeEventListener('paste', handlePaste);
-  }, [onPasteOnCanvas, offset, scale]);
+  }, []); // Registered once, reads from refs
 
   // Card Handlers
   const handleCardMouseDown = (e: React.MouseEvent, id: string) => {

@@ -906,6 +906,7 @@ export const CampaignDetail: React.FC<CampaignDetailProps> = ({
                 onDoubleClick={(id) => setDetailContentId(id)}
                 onCanvasDoubleClick={handleCanvasDoubleClick}
                 onPasteOnCanvas={handlePasteOnCanvas}
+                pasteEnabled={!creationModal}
                 brandName={brandName}
                 focusTarget={canvasFocusTarget}
              />

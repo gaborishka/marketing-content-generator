@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   X,
   Plus,
@@ -89,6 +89,10 @@ for (const [parent, formats] of Object.entries(CHANNEL_FORMATS)) {
   }
 }
 
+const MAX_IMAGE_SIZE_BYTES = 10 * 1024 * 1024; // 10 MB
+
+type SceneWithKey = Scene & { _key: string };
+
 export const ContentCreationModal: React.FC<ContentCreationModalProps> = ({
   campaignId,
   onClose,
@@ -105,14 +109,17 @@ export const ContentCreationModal: React.FC<ContentCreationModalProps> = ({
   const [selectedAudience, setSelectedAudience] = useState(existingAudiences[0] || 'General Public');
   const [isChannelDropdownOpen, setIsChannelDropdownOpen] = useState(false);
   const [isDragOver, setIsDragOver] = useState(false);
-  const [scenes, setScenes] = useState<Scene[]>([
-    { sceneNumber: 1, imagePrompt: '', voiceover: '' },
-    { sceneNumber: 2, imagePrompt: '', voiceover: '' },
-    { sceneNumber: 3, imagePrompt: '', voiceover: '' },
+
+  const sceneKeyCounter = useRef(3);
+  const [scenes, setScenes] = useState<SceneWithKey[]>([
+    { _key: '1', sceneNumber: 1, imagePrompt: '', voiceover: '' },
+    { _key: '2', sceneNumber: 2, imagePrompt: '', voiceover: '' },
+    { _key: '3', sceneNumber: 3, imagePrompt: '', voiceover: '' },
   ]);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const dropZoneRef = useRef<HTMLDivElement>(null);
+  const channelDropdownRef = useRef<HTMLDivElement>(null);
 
   const isVideoStoryboard = getParentChannel(selectedChannel) === 'Video Storyboard';
 
@@ -125,9 +132,30 @@ export const ContentCreationModal: React.FC<ContentCreationModalProps> = ({
     return () => document.removeEventListener('keydown', handleEsc);
   }, [onClose]);
 
+  // Close channel dropdown on outside click
+  useEffect(() => {
+    if (!isChannelDropdownOpen) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      if (channelDropdownRef.current && !channelDropdownRef.current.contains(e.target as Node)) {
+        setIsChannelDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [isChannelDropdownOpen]);
+
+  const validateImageSize = useCallback((file: File): boolean => {
+    if (file.size > MAX_IMAGE_SIZE_BYTES) {
+      alert(`Image is too large (${(file.size / 1024 / 1024).toFixed(1)} MB). Maximum size is 10 MB.`);
+      return false;
+    }
+    return true;
+  }, []);
+
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || !file.type.startsWith('image/')) return;
+    if (!validateImageSize(file)) return;
     const reader = new FileReader();
     reader.onload = () => {
       setImageDataUrl(reader.result as string);
@@ -140,6 +168,7 @@ export const ContentCreationModal: React.FC<ContentCreationModalProps> = ({
     setIsDragOver(false);
     const file = e.dataTransfer.files?.[0];
     if (!file || !file.type.startsWith('image/')) return;
+    if (!validateImageSize(file)) return;
     const reader = new FileReader();
     reader.onload = () => {
       setImageDataUrl(reader.result as string);
@@ -161,7 +190,8 @@ export const ContentCreationModal: React.FC<ContentCreationModalProps> = ({
   };
 
   const handleAddScene = () => {
-    setScenes(prev => [...prev, { sceneNumber: prev.length + 1, imagePrompt: '', voiceover: '' }]);
+    sceneKeyCounter.current += 1;
+    setScenes(prev => [...prev, { _key: String(sceneKeyCounter.current), sceneNumber: prev.length + 1, imagePrompt: '', voiceover: '' }]);
   };
 
   const handleRemoveScene = (index: number) => {
@@ -173,19 +203,22 @@ export const ContentCreationModal: React.FC<ContentCreationModalProps> = ({
       const validScenes = scenes.filter(s => s.voiceover.trim() || s.imagePrompt.trim());
       if (validScenes.length === 0) return;
 
+      // Strip internal _key before persisting
+      const cleanScenes: Scene[] = validScenes.map(({ _key, ...rest }) => rest);
+
       const newContent: GeneratedContent = {
-        id: `manual-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        id: `manual-${crypto.randomUUID()}`,
         campaignId,
         channel: selectedChannel,
         audience: selectedAudience,
-        text: text.trim() || validScenes.map(s => s.voiceover).join(' | '),
+        text: text.trim() || cleanScenes.map(s => s.voiceover).join(' | '),
         complianceScore: 0,
         status: 'draft',
         riskLevel: 'low',
         x: canvasPosition.x,
         y: canvasPosition.y,
         width: 320,
-        storyboard: validScenes,
+        storyboard: cleanScenes,
         videoStatus: 'idle',
       };
       onCreate(newContent);
@@ -193,7 +226,7 @@ export const ContentCreationModal: React.FC<ContentCreationModalProps> = ({
       if (!text.trim() && !imageDataUrl) return;
 
       const newContent: GeneratedContent = {
-        id: `manual-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        id: `manual-${crypto.randomUUID()}`,
         campaignId,
         channel: selectedChannel,
         audience: selectedAudience,
@@ -256,7 +289,7 @@ export const ContentCreationModal: React.FC<ContentCreationModalProps> = ({
             {/* Channel Selector */}
             <div>
               <label className="text-xs font-semibold text-slate-500 uppercase block mb-1.5">Channel / Format</label>
-              <div className="relative">
+              <div className="relative" ref={channelDropdownRef}>
                 <button
                   onClick={() => setIsChannelDropdownOpen(!isChannelDropdownOpen)}
                   className={`w-full flex items-center justify-between px-3 py-2.5 rounded-lg border text-sm font-medium transition-colors ${channelColor.bg} ${channelColor.border} ${channelColor.text}`}
@@ -394,7 +427,7 @@ export const ContentCreationModal: React.FC<ContentCreationModalProps> = ({
 
                 <div className="space-y-3">
                   {scenes.map((scene, index) => (
-                    <div key={index} className="bg-slate-50 border border-slate-200 rounded-xl p-3 relative group">
+                    <div key={scene._key} className="bg-slate-50 border border-slate-200 rounded-xl p-3 relative group">
                       <div className="flex items-center justify-between mb-2">
                         <span className="text-xs font-bold text-violet-600 bg-violet-50 px-2 py-0.5 rounded-full">
                           Scene {scene.sceneNumber}
