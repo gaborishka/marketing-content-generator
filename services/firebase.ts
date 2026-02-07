@@ -1,5 +1,5 @@
 import { initializeApp } from 'firebase/app';
-import { getFirestore } from 'firebase/firestore';
+import { getFirestore, connectFirestoreEmulator } from 'firebase/firestore';
 import { getAuth } from 'firebase/auth';
 import { getStorage } from 'firebase/storage';
 import { getFunctions, connectFunctionsEmulator } from 'firebase/functions';
@@ -21,4 +21,5 @@ export const functions = getFunctions(app); // → geminiService.ts (Cloud Funct
 
 if (import.meta.env.DEV && import.meta.env.VITE_USE_EMULATORS === 'true') {
   connectFunctionsEmulator(functions, '127.0.0.1', 5001);
+  connectFirestoreEmulator(db, '127.0.0.1', 8080);
 }

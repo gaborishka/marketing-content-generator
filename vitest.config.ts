@@ -8,5 +8,6 @@ export default defineConfig({
   test: {
     globals: true,
     environment: 'node',
+    exclude: ['functions/lib/**', '**/node_modules/**'],
   }
 });

@@ -124,7 +124,7 @@ describe("runComplianceCheck", () => {
       complianceDetails: {
         score: 55,
         violations: ["Unsubstantiated superlative"],
-        suggestions: ["Unsubstantiated superlative"],
+        suggestions: ["Replace 'best widget ever' with 'industry-leading widget'"],
         suggestedFix: "Replace 'best widget ever' with 'industry-leading widget'",
         retryAttempt: 0,
       },

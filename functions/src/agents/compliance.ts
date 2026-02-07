@@ -92,7 +92,7 @@ export async function runComplianceCheck(
         complianceDetails: {
           score,
           violations: result.violations,
-          suggestions: result.violations,
+          suggestions: result.suggestedFix ? [result.suggestedFix] : [],
           suggestedFix: result.suggestedFix,
           retryAttempt,
         },

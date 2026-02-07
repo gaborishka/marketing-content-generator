@@ -118,7 +118,18 @@ export const CampaignDetail: React.FC<CampaignDetailProps> = ({
   const filterButtonRef = useRef<HTMLButtonElement>(null);
   const filterPanelRef = useRef<HTMLDivElement>(null);
 
+  // Refs to avoid stale closures in Firestore subscription callbacks
+  const contentStoreRef = useRef(contentStore);
+  contentStoreRef.current = contentStore;
+  const onUpdateContentRef = useRef(onUpdateContent);
+  onUpdateContentRef.current = onUpdateContent;
+
   const campaign = campaigns.find(c => c.id === id);
+
+  const campaignRef = useRef(campaign);
+  campaignRef.current = campaign;
+  const onUpdateCampaignRef = useRef(onUpdateCampaign);
+  onUpdateCampaignRef.current = onUpdateCampaign;
   const primaryProduct = products.find(p => p.id === campaign?.primaryProductId);
   const secondaryProducts = products.filter(p => campaign?.secondaryProductIds.includes(p.id));
   const brandName = primaryProduct?.brand || campaign?.name || 'Your Brand';
@@ -235,8 +246,9 @@ export const CampaignDetail: React.FC<CampaignDetailProps> = ({
         setActiveJobId(null);
         setJobStatus(null);
         // Update campaign status after successful generation
-        if (campaign && campaign.status === 'draft') {
-          onUpdateCampaign({ ...campaign, status: 'review', progress: 50 });
+        const currentCampaign = campaignRef.current;
+        if (currentCampaign && currentCampaign.status === 'draft') {
+          onUpdateCampaignRef.current({ ...currentCampaign, status: 'review', progress: 50 });
         }
       } else if (job.status === 'failed') {
         setIsGenerating(false);
@@ -262,8 +274,12 @@ export const CampaignDetail: React.FC<CampaignDetailProps> = ({
 
       if (jobContent.length === 0) return;
 
+      // Use refs to get latest values, avoiding stale closures
+      const currentContentStore = contentStoreRef.current;
+      const currentCampaign = campaignRef.current;
+
       // Assign canvas positions to new items that don't have them yet
-      const existingContent = contentStore.filter(c => c.campaignId === campaign.id);
+      const existingContent = currentContentStore.filter(c => c.campaignId === currentCampaign?.id);
       let startX = 50;
       if (existingContent.length > 0) {
         const maxX = Math.max(...existingContent.map(c => c.x));
@@ -279,8 +295,8 @@ export const CampaignDetail: React.FC<CampaignDetailProps> = ({
 
       // Merge: keep non-job content, replace job content with latest from Firestore
       const jobIds = new Set(positioned.map(c => c.id));
-      const otherContent = contentStore.filter(c => !jobIds.has(c.id));
-      onUpdateContent([...otherContent, ...positioned]);
+      const otherContent = currentContentStore.filter(c => !jobIds.has(c.id));
+      onUpdateContentRef.current([...otherContent, ...positioned]);
     });
 
     return unsub;

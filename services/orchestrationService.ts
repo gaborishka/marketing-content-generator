@@ -8,7 +8,7 @@ import {
   where,
   Unsubscribe,
 } from 'firebase/firestore';
-import { functions, db } from './firebase';
+import { functions, db, auth } from './firebase';
 import { GeneratedContent, Scene } from '../types';
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -92,7 +92,12 @@ export function subscribeToContent(
   onError?: (error: Error) => void,
 ): Unsubscribe {
   const contentRef = collection(db, 'content');
-  const q = query(contentRef, where('campaignId', '==', campaignId));
+  const userId = auth.currentUser?.uid;
+  const filters = [where('campaignId', '==', campaignId)];
+  if (userId) {
+    filters.push(where('userId', '==', userId));
+  }
+  const q = query(contentRef, ...filters);
 
   return onSnapshot(
     q,

@@ -40,6 +40,7 @@ vi.mock('firebase/firestore', () => ({
 vi.mock('../firebase', () => ({
   functions: {},
   db: {},
+  auth: { currentUser: { uid: 'test-user-123' } },
 }));
 
 import {

@@ -1,6 +1,5 @@
 import { onCall, HttpsError } from "firebase-functions/v2/https";
 import { onDocumentCreated } from "firebase-functions/v2/firestore";
-import { defineSecret } from "firebase-functions/params";
 import { GoogleGenAI, Type, VideoGenerationReferenceType } from "@google/genai";
 import { initializeApp } from "firebase-admin/app";
 import { getStorage } from "firebase-admin/storage";
@@ -8,6 +7,7 @@ import { randomUUID } from "crypto";
 import { join } from "path";
 import { readFile, unlink } from "fs/promises";
 import { tmpdir } from "os";
+import { GEMINI_API_KEY } from "./utils/gemini";
 
 initializeApp();
 
@@ -38,8 +38,6 @@ interface GenerateVideoInput {
   prompt?: string;
   contentId: string;
 }
-
-const GEMINI_API_KEY = defineSecret("GEMINI_API_KEY");
 
 const getAiClient = () => new GoogleGenAI({ apiKey: GEMINI_API_KEY.value() });
 
@@ -264,7 +262,7 @@ export const generateVideo = onCall(
 // Quick onCall trigger: validates input, creates a job doc, returns { jobId }.
 // The actual pipeline runs asynchronously via processGenerationJob below.
 
-import { createJobDoc } from "./utils/firestore";
+import { createJobDoc, updateJobDoc } from "./utils/firestore";
 import { runOrchestrator } from "./agents/orchestrator";
 
 interface GenerateCampaignInput {
@@ -319,18 +317,21 @@ export const processGenerationJob = onDocumentCreated(
   },
   async (event) => {
     const snap = event.data;
+    const jobId = event.params.jobId;
+
     if (!snap) {
       console.error("processGenerationJob: no snapshot data");
+      try { await updateJobDoc(jobId, { status: "failed", phase: "Failed", error: "No snapshot data" }); } catch {}
       return;
     }
 
     const data = snap.data();
-    const jobId = event.params.jobId;
     const campaignId = data.campaignId as string;
     const userId = data.userId as string;
 
     if (!campaignId || !userId) {
       console.error("processGenerationJob: missing campaignId or userId in job doc");
+      try { await updateJobDoc(jobId, { status: "failed", phase: "Failed", error: "Missing campaignId or userId" }); } catch {}
       return;
     }
 
