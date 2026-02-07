@@ -153,3 +153,27 @@ for (const [parent, formats] of Object.entries(CHANNEL_FORMATS)) {
 export function getParentChannel(subFormat: string): string {
   return SUB_FORMAT_TO_PARENT[subFormat] ?? subFormat;
 }
+
+// Landing Page Interview
+export interface InterviewQuestion {
+  label: string;
+  question: string;
+  options: string[];
+}
+
+// Chat-based Landing Page Generator
+export interface ChatMessage {
+  id: string;
+  role: 'user' | 'assistant';
+  content: string;
+  timestamp: number;
+}
+
+export interface LandingPageProject {
+  id: string;
+  title: string;
+  conversationHistory: ChatMessage[];
+  currentHtml: string | null;
+  createdAt: number;
+  updatedAt: number;
+}

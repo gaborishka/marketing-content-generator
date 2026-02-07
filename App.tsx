@@ -9,7 +9,8 @@ import { ContentGenerator } from './components/ContentGenerator';
 import { CampaignDetail } from './components/CampaignDetail';
 import { ComplianceRules } from './components/ComplianceRules';
 import { BrandManager } from './components/BrandManager';
-import { Product, Campaign, GeneratedContent, ComplianceRule, Brand } from './types';
+import { LandingPageGenerator } from './components/LandingPageGenerator';
+import { Product, Campaign, GeneratedContent, ComplianceRule, Brand, LandingPageProject } from './types';
 import { Loader2 } from 'lucide-react';
 import * as storage from './services/storageService';
 import { uploadContentImages, isBase64DataUrl } from './services/fileStorage';
@@ -151,7 +152,8 @@ function App() {
   const [contentStore, setContentStore] = useState<GeneratedContent[]>([]);
   const [complianceRules, setComplianceRules] = useState<ComplianceRule[]>([]);
   const [brands, setBrands] = useState<Brand[]>([]);
-  
+  const [landingPages, setLandingPages] = useState<LandingPageProject[]>([]);
+
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [isLoadingData, setIsLoadingData] = useState(true);
@@ -173,12 +175,13 @@ function App() {
     }
     const loadData = async () => {
       try {
-        const [dbProducts, dbCampaigns, dbContent, dbComplianceRules, dbBrands] = await Promise.all([
+        const [dbProducts, dbCampaigns, dbContent, dbComplianceRules, dbBrands, dbLandingPages] = await Promise.all([
           storage.getAll<Product>('products'),
           storage.getAll<Campaign>('campaigns'),
           storage.getAll<GeneratedContent>('content'),
           storage.getAll<ComplianceRule>('complianceRules'),
-          storage.getAll<Brand>('brands')
+          storage.getAll<Brand>('brands'),
+          storage.getAll<LandingPageProject>('landingPages')
         ]);
 
         if (dbProducts.length === 0) {
@@ -198,6 +201,7 @@ function App() {
 
         setComplianceRules(dbComplianceRules);
         setBrands(dbBrands);
+        setLandingPages(dbLandingPages);
 
         if (dbContent.length === 0) {
           await Promise.all(INITIAL_CONTENT.map(c => storage.put('content', c)));
@@ -213,6 +217,7 @@ function App() {
         setContentStore(INITIAL_CONTENT);
         setComplianceRules([]);
         setBrands([]);
+        setLandingPages([]);
       } finally {
         setIsLoadingData(false);
       }
@@ -289,6 +294,20 @@ function App() {
   const handleBrandDelete = (brandId: string) => {
     setBrands(prev => prev.filter(b => b.id !== brandId));
     storage.deleteItem('brands', brandId);
+  };
+
+  const handleLandingPageSave = (project: LandingPageProject) => {
+    setLandingPages(prev => {
+      const exists = prev.find(p => p.id === project.id);
+      if (exists) return prev.map(p => p.id === project.id ? project : p);
+      return [project, ...prev];
+    });
+    storage.put('landingPages', project);
+  };
+
+  const handleLandingPageDelete = (id: string) => {
+    setLandingPages(prev => prev.filter(p => p.id !== id));
+    storage.deleteItem('landingPages', id);
   };
 
   const handleCampaignCreated = (newCampaign: Campaign) => {
@@ -467,6 +486,16 @@ function App() {
                 onCreate={handleComplianceRuleCreate}
                 onUpdate={handleComplianceRuleUpdate}
                 onDelete={handleComplianceRuleDelete}
+              />
+            }
+          />
+          <Route
+            path="/landing"
+            element={
+              <LandingPageGenerator
+                landingPages={landingPages}
+                onSave={handleLandingPageSave}
+                onDelete={handleLandingPageDelete}
               />
             }
           />

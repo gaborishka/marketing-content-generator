@@ -278,10 +278,79 @@ export const generateVideo = onCall(
   }
 );
 
+// ── generateLandingPage ──────────────────────────────────────────────────────
+
+interface GenerateLandingPageInput {
+  conversationHistory: { role: string; content: string }[];
+  currentHtml?: string;
+}
+
+export const generateLandingPage = onCall(
+  { timeoutSeconds: 120, memory: "1GiB", secrets: [GEMINI_API_KEY], cors: true },
+  async (request) => {
+    if (!request.auth) {
+      throw new HttpsError("unauthenticated", "Authentication required.");
+    }
+
+    const { conversationHistory, currentHtml } = request.data as GenerateLandingPageInput;
+    if (!conversationHistory || conversationHistory.length === 0) {
+      throw new HttpsError("invalid-argument", "conversationHistory is required.");
+    }
+
+    const ai = getAiClient();
+
+    const contents = conversationHistory.map((msg) => ({
+      role: msg.role === "assistant" ? "model" : "user",
+      parts: [{ text: msg.content }],
+    }));
+
+    try {
+      const response = await ai.models.generateContent({
+        model: "gemini-2.5-flash",
+        contents,
+        config: {
+          systemInstruction: buildLandingPageSystemPrompt(currentHtml || undefined),
+          maxOutputTokens: 32768,
+        },
+      });
+
+      const text = response.text || "";
+
+      // Try to extract structured interview questions from ```json code fence
+      const jsonMatch = text.match(/```json\s*\n([\s\S]*?)```/);
+      if (jsonMatch) {
+        try {
+          const parsed = JSON.parse(jsonMatch[1]);
+          if (Array.isArray(parsed.questions) && parsed.questions.length > 0) {
+            return { message: "", html: null, interview: parsed.questions };
+          }
+        } catch {
+          // JSON parse failed — fall through to normal handling
+        }
+      }
+
+      // Extract HTML from ```html ... ``` code fence
+      const htmlMatch = text.match(/```html\s*\n([\s\S]*?)```/);
+      const html = htmlMatch ? htmlMatch[1].trim() : null;
+
+      // Strip code fence from message to get just the conversational text
+      const message = html
+        ? text.replace(/```html\s*\n[\s\S]*?```/, "").trim() || "Here's your landing page!"
+        : text;
+
+      return { message, html, interview: null };
+    } catch (error: any) {
+      console.error("generateLandingPage error:", error);
+      throw new HttpsError("internal", error.message || "Landing page generation failed.");
+    }
+  }
+);
+
 // ── generateCampaignContent ──────────────────────────────────────────────────
 // Quick onCall trigger: validates input, creates a job doc, returns { jobId }.
 // The actual pipeline runs asynchronously via processGenerationJob below.
 
+import { buildLandingPageSystemPrompt } from "./prompts/landingPage.prompt";
 import { createJobIfNoActive, updateJobDoc } from "./utils/firestore";
 import { runOrchestrator } from "./agents/orchestrator";
 
