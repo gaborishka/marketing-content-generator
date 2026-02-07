@@ -8,7 +8,8 @@ import { CampaignList } from './components/CampaignList';
 import { ContentGenerator } from './components/ContentGenerator';
 import { CampaignDetail } from './components/CampaignDetail';
 import { ComplianceRules } from './components/ComplianceRules';
-import { Product, Campaign, GeneratedContent, ComplianceRule } from './types';
+import { BrandManager } from './components/BrandManager';
+import { Product, Campaign, GeneratedContent, ComplianceRule, Brand } from './types';
 import { Loader2 } from 'lucide-react';
 import * as storage from './services/storageService';
 import { uploadContentImages, isBase64DataUrl } from './services/fileStorage';
@@ -149,6 +150,7 @@ function App() {
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [contentStore, setContentStore] = useState<GeneratedContent[]>([]);
   const [complianceRules, setComplianceRules] = useState<ComplianceRule[]>([]);
+  const [brands, setBrands] = useState<Brand[]>([]);
   
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
@@ -171,11 +173,12 @@ function App() {
     }
     const loadData = async () => {
       try {
-        const [dbProducts, dbCampaigns, dbContent, dbComplianceRules] = await Promise.all([
+        const [dbProducts, dbCampaigns, dbContent, dbComplianceRules, dbBrands] = await Promise.all([
           storage.getAll<Product>('products'),
           storage.getAll<Campaign>('campaigns'),
           storage.getAll<GeneratedContent>('content'),
-          storage.getAll<ComplianceRule>('complianceRules')
+          storage.getAll<ComplianceRule>('complianceRules'),
+          storage.getAll<Brand>('brands')
         ]);
 
         if (dbProducts.length === 0) {
@@ -194,6 +197,7 @@ function App() {
         }
 
         setComplianceRules(dbComplianceRules);
+        setBrands(dbBrands);
 
         if (dbContent.length === 0) {
           await Promise.all(INITIAL_CONTENT.map(c => storage.put('content', c)));
@@ -208,6 +212,7 @@ function App() {
         setCampaigns(MOCK_CAMPAIGNS);
         setContentStore(INITIAL_CONTENT);
         setComplianceRules([]);
+        setBrands([]);
       } finally {
         setIsLoadingData(false);
       }
@@ -237,6 +242,21 @@ function App() {
       }
       return c;
     }));
+  };
+
+  const handleBrandCreate = (brand: Brand) => {
+    setBrands(prev => [brand, ...prev]);
+    storage.put('brands', brand);
+  };
+
+  const handleBrandUpdate = (brand: Brand) => {
+    setBrands(prev => prev.map(b => b.id === brand.id ? brand : b));
+    storage.put('brands', brand);
+  };
+
+  const handleBrandDelete = (brandId: string) => {
+    setBrands(prev => prev.filter(b => b.id !== brandId));
+    storage.deleteItem('brands', brandId);
   };
 
   const handleCampaignCreated = (newCampaign: Campaign) => {
@@ -389,6 +409,17 @@ function App() {
             } 
           />
           <Route path="/products" element={<ProductCatalog products={products} />} />
+          <Route
+            path="/brands"
+            element={
+              <BrandManager
+                brands={brands}
+                onCreate={handleBrandCreate}
+                onUpdate={handleBrandUpdate}
+                onDelete={handleBrandDelete}
+              />
+            }
+          />
           <Route
             path="/compliance-rules"
             element={
