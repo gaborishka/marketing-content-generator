@@ -356,18 +356,18 @@ components/
 
 ### Phase 5: Asset Manager — Server-Side Image Generation
 
-- [ ] Create `functions/src/agents/assetManager.ts`
-  - [ ] Read content items from Firestore
-  - [ ] Generate images in parallel (`Promise.allSettled`, concurrency limit of 3)
-  - [ ] Regular channels: 1 hero image via Gemini `gemini-3-pro-image-preview`
-  - [ ] Video Storyboard: 3 scene images per storyboard
-  - [ ] Upload base64 → Firebase Storage (`users/{uid}/content/{contentId}/`)
-  - [ ] Update each Firestore content doc with Storage download URL immediately
-  - [ ] Non-blocking failures: content item remains valid with empty `imageUrl`
-- [ ] Wire asset manager into orchestrator (after compliance loop)
-  - [ ] Check timeout budget: skip image gen if <120s remains
-  - [ ] Update progress per completed image
-- [ ] Test: verify images appear one-by-one via Firestore listener
+- [x] Create `functions/src/agents/assetManager.ts`
+  - [x] Read content items from Firestore
+  - [x] Generate images in parallel (`Promise.allSettled`, concurrency limit of 3)
+  - [x] Regular channels: 1 hero image via Gemini `gemini-3-pro-image-preview`
+  - [x] Video Storyboard: 3 scene images per storyboard
+  - [x] Upload base64 → Firebase Storage (`users/{uid}/content/{contentId}/`)
+  - [x] Update each Firestore content doc with Storage download URL immediately
+  - [x] Non-blocking failures: content item remains valid with empty `imageUrl`
+- [x] Wire asset manager into orchestrator (after compliance loop)
+  - [x] Check timeout budget: skip image gen if <120s remains
+  - [x] Update progress per completed image
+- [x] Test: verify images appear one-by-one via Firestore listener
 
 ### Phase 6: Frontend Integration
 

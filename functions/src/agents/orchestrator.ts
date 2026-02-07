@@ -6,6 +6,7 @@ import { TimeoutBudget } from "../utils/timeout";
 import { runPlanner } from "./planner";
 import { generateText, regenerateText } from "./generator";
 import { runComplianceCheck } from "./compliance";
+import { runAssetManager } from "./assetManager";
 import { ContentDoc, ComplianceFeedback } from "../types/pipeline";
 
 const MAX_COMPLIANCE_RETRIES = 2;
@@ -164,8 +165,27 @@ export async function runOrchestrator(
       });
     }
 
+    // ── Stage 4: Asset Manager (Image Generation) ──────────────────────────
+    const IMAGE_BUDGET_SECONDS = 120;
+
+    if (budget.hasTimeFor(IMAGE_BUDGET_SECONDS)) {
+      await progress.setPhase("generating_images", "Generating images...", 75);
+
+      const assetResult = await runAssetManager({
+        contentDocs,
+        userId,
+      });
+
+      if (assetResult.success && assetResult.data) {
+        await progress.update({
+          status: "generating_images",
+          phase: `Images complete (${assetResult.data.successCount}/${assetResult.data.totalImages})`,
+          progress: 95,
+        });
+      }
+    }
+
     // ── Complete ───────────────────────────────────────────────────────────
-    // Future phases will add asset manager stage here.
     await progress.complete(contentIds);
 
     return { success: true, contentIds };
