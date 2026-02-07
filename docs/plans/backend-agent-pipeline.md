@@ -371,21 +371,21 @@ components/
 
 ### Phase 6: Frontend Integration
 
-- [ ] Create `services/orchestrationService.ts`
-  - [ ] `startGeneration(campaignId)` — call `generateCampaignContent`, return jobId
-  - [ ] `subscribeToJob(jobId, callback)` — Firestore onSnapshot for progress/status
-  - [ ] `subscribeToContent(campaignId, callback)` — Firestore onSnapshot for content updates
-- [ ] Modify `components/CampaignDetail.tsx`
-  - [ ] Replace `handleGenerateMore` to call `startGeneration` instead of direct `generateMarketingContent`
-  - [ ] Subscribe to job doc for progress bar/status display
-  - [ ] Subscribe to content collection — replace placeholder-then-fill pattern with Firestore-driven updates
-  - [ ] Handle job states: show progress during generation, error message on failure
-- [ ] Test E2E: click "Generate New Variants" →
-  - [ ] jobId returned instantly (not blocking on pipeline)
-  - [ ] Progress updates appear in real-time
-  - [ ] Content cards appear as text is generated
-  - [ ] Images fill in one-by-one via Asset Manager
-  - [ ] Compliance scores reflect separate evaluation (not self-reported)
+- [x] Create `services/orchestrationService.ts`
+  - [x] `startGeneration(campaignId)` — call `generateCampaignContent`, return jobId
+  - [x] `subscribeToJob(jobId, callback)` — Firestore onSnapshot for progress/status
+  - [x] `subscribeToContent(campaignId, callback)` — Firestore onSnapshot for content updates
+- [x] Modify `components/CampaignDetail.tsx`
+  - [x] Replace `handleGenerateMore` to call `startGeneration` instead of direct `generateMarketingContent`
+  - [x] Subscribe to job doc for progress bar/status display
+  - [x] Subscribe to content collection — replace placeholder-then-fill pattern with Firestore-driven updates
+  - [x] Handle job states: show progress during generation, error message on failure
+- [x] Test E2E: click "Generate New Variants" →
+  - [x] jobId returned instantly (not blocking on pipeline)
+  - [x] Progress updates appear in real-time
+  - [x] Content cards appear as text is generated
+  - [x] Images fill in one-by-one via Asset Manager
+  - [x] Compliance scores reflect separate evaluation (not self-reported)
 
 ### Phase 7: Cleanup + Future-Proofing
 

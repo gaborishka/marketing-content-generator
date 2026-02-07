@@ -43,7 +43,7 @@ import {
 import { useParams, Link } from 'react-router-dom';
 import { Campaign, Product, GeneratedContent, ComplianceRule, CHANNEL_FORMATS, getParentChannel } from '../types';
 import { CanvasBoard, INITIAL_CANVAS_SCALE } from './CanvasBoard';
-import { generateMarketingContent } from '../services/geminiService';
+import { startGeneration, subscribeToJob, subscribeToContent, JobStatus } from '../services/orchestrationService';
 import { VideoStoryboardModal } from './VideoStoryboardModal';
 import { ContentDetailModal } from './ContentDetailModal';
 import { ContentCreationModal } from './ContentCreationModal';
@@ -113,6 +113,8 @@ export const CampaignDetail: React.FC<CampaignDetailProps> = ({
   } | null>(null);
   const [filters, setFilters] = useState<ContentFilters>(INITIAL_FILTERS);
   const [isFilterPanelOpen, setIsFilterPanelOpen] = useState(false);
+  const [activeJobId, setActiveJobId] = useState<string | null>(null);
+  const [jobStatus, setJobStatus] = useState<JobStatus | null>(null);
   const filterButtonRef = useRef<HTMLButtonElement>(null);
   const filterPanelRef = useRef<HTMLDivElement>(null);
 
@@ -220,6 +222,70 @@ export const CampaignDetail: React.FC<CampaignDetailProps> = ({
     };
   }, [isFilterPanelOpen]);
 
+  // ── Job subscription: track pipeline progress in real time ───────────────
+  useEffect(() => {
+    if (!activeJobId) return;
+
+    const unsub = subscribeToJob(activeJobId, (job) => {
+      setJobStatus(job);
+
+      if (job.status === 'completed') {
+        setIsGenerating(false);
+        setStatusMessage(null);
+        setActiveJobId(null);
+        setJobStatus(null);
+        // Update campaign status after successful generation
+        if (campaign && campaign.status === 'draft') {
+          onUpdateCampaign({ ...campaign, status: 'review', progress: 50 });
+        }
+      } else if (job.status === 'failed') {
+        setIsGenerating(false);
+        setStatusMessage(job.error || 'Generation failed. Please try again.');
+        setActiveJobId(null);
+        setJobStatus(null);
+      }
+    });
+
+    return unsub;
+  }, [activeJobId]);
+
+  // ── Content subscription: stream generated content from Firestore ────────
+  useEffect(() => {
+    if (!activeJobId || !campaign) return;
+
+    const unsub = subscribeToContent(campaign.id, (firestoreContent) => {
+      // Merge Firestore-generated content into the content store.
+      // Only include items from the active generation job.
+      const jobContent = firestoreContent.filter(
+        (c) => c.generationJobId === activeJobId
+      );
+
+      if (jobContent.length === 0) return;
+
+      // Assign canvas positions to new items that don't have them yet
+      const existingContent = contentStore.filter(c => c.campaignId === campaign.id);
+      let startX = 50;
+      if (existingContent.length > 0) {
+        const maxX = Math.max(...existingContent.map(c => c.x));
+        startX = maxX + 400;
+      }
+
+      const positioned = jobContent.map((item, idx) => ({
+        ...item,
+        x: item.x || startX + (Math.floor(idx / 2) * 340),
+        y: item.y || 100 + ((idx % 2) * 450),
+        width: item.width || 320,
+      }));
+
+      // Merge: keep non-job content, replace job content with latest from Firestore
+      const jobIds = new Set(positioned.map(c => c.id));
+      const otherContent = contentStore.filter(c => !jobIds.has(c.id));
+      onUpdateContent([...otherContent, ...positioned]);
+    });
+
+    return unsub;
+  }, [activeJobId, campaign?.id]);
+
   // Generate button validation
   const canGenerate = campaign ? campaign.targetAudiences.length > 0 && campaign.channels.length > 0 : false;
 
@@ -251,153 +317,16 @@ export const CampaignDetail: React.FC<CampaignDetailProps> = ({
 
     setIsGenerating(true);
     setStatusMessage(null);
-
-    let startX = 50;
-    if (campaignContent.length > 0) {
-      const maxX = Math.max(...campaignContent.map(c => c.x));
-      startX = maxX + 400;
-    }
-
-    const newPlaceholders: GeneratedContent[] = [];
-    let index = 0;
-
-    // Build channel × audience combinations (channels are already sub-format names)
-    const combinations: { channel: string; audience: string }[] = [];
-    for (const channel of campaign.channels) {
-      for (const audience of campaign.targetAudiences) {
-        combinations.push({ channel, audience });
-      }
-    }
-
-    // Cap at 6 to match AI generation limit
-    for (const { channel, audience } of combinations.slice(0, 6)) {
-         const exists = campaignContent.some(c => c.channel === channel && c.audience === audience);
-         if (exists) continue;
-
-         newPlaceholders.push({
-           id: `temp-${Date.now()}-${index}`,
-           campaignId: campaign.id,
-           channel,
-           audience,
-           text: '',
-           complianceScore: 0,
-           riskLevel: 'low',
-           status: 'generating',
-           imageUrl: '',
-           x: startX + (Math.floor(index / 2) * 340),
-           y: 100 + ((index % 2) * 450),
-           width: 320
-         });
-         index++;
-    }
-
-    if (newPlaceholders.length === 0) {
-       setStatusMessage("All combinations covered. Generating alternatives...");
-       const audience = campaign.targetAudiences[0] || 'General Public';
-       for (const channel of campaign.channels.slice(0, 3)) {
-           newPlaceholders.push({
-             id: `temp-${Date.now()}-${index}`,
-             campaignId: campaign.id,
-             channel,
-             audience,
-             text: '',
-             complianceScore: 0,
-             riskLevel: 'low',
-             status: 'generating',
-             imageUrl: '',
-             x: startX + (Math.floor(index / 2) * 340),
-             y: 100 + ((index % 2) * 450),
-             width: 320
-           });
-           index++;
-       }
-    } else {
-       setStatusMessage(`Generating ${newPlaceholders.length} missing variants...`);
-    }
-
-    if (newPlaceholders.length === 0) {
-      setIsGenerating(false);
-      setStatusMessage("No channels defined to generate content for.");
-      return;
-    }
-
-    onUpdateContent([...contentStore, ...newPlaceholders]);
-
-    if (newPlaceholders.length > 0) {
-      const avgX = newPlaceholders.reduce((sum, p) => sum + p.x, 0) / newPlaceholders.length + 160;
-      const avgY = newPlaceholders.reduce((sum, p) => sum + p.y, 0) / newPlaceholders.length + 200;
-      setCanvasFocusTarget({ x: avgX, y: avgY, timestamp: Date.now() });
-    }
+    setJobStatus(null);
 
     try {
-      const results = await generateMarketingContent(
-        campaign,
-        products,
-        complianceRule,
-        (updatedContentItem) => {
-          onUpdateItem(updatedContentItem);
-        }
-      );
-
-      const filledPlaceholders: GeneratedContent[] = [];
-      const usedResultsIndices = new Set<number>();
-
-      newPlaceholders.forEach(placeholder => {
-        const resultIndex = results.findIndex((r, idx) =>
-          r.channel === placeholder.channel &&
-          r.audience === placeholder.audience &&
-          !usedResultsIndices.has(idx)
-        );
-
-        if (resultIndex !== -1) {
-          usedResultsIndices.add(resultIndex);
-          const match = results[resultIndex];
-          filledPlaceholders.push({
-            ...match,
-            x: placeholder.x,
-            y: placeholder.y,
-            width: placeholder.width,
-            id: match.id
-          });
-        } else {
-           const anyResultIndex = results.findIndex((r, idx) => !usedResultsIndices.has(idx));
-           if (anyResultIndex !== -1) {
-              usedResultsIndices.add(anyResultIndex);
-              const match = results[anyResultIndex];
-               filledPlaceholders.push({
-                ...match,
-                x: placeholder.x,
-                y: placeholder.y,
-                width: placeholder.width,
-                id: match.id
-              });
-           } else {
-              filledPlaceholders.push({
-                ...placeholder,
-                status: 'draft',
-                text: 'Content generation unavailable for this variant.',
-                complianceScore: 0
-             } as GeneratedContent);
-           }
-        }
-      });
-
-      const placeholderIds = newPlaceholders.map(p => p.id);
-      const contentKeep = contentStore.filter(c => !placeholderIds.includes(c.id));
-      onUpdateContent([...contentKeep, ...filledPlaceholders]);
-
-      // Update campaign status after successful generation
-      if (campaign.status === 'draft') {
-        onUpdateCampaign({ ...campaign, status: 'review', progress: 50 });
-      }
-
+      const jobId = await startGeneration(campaign.id);
+      setActiveJobId(jobId);
+      setStatusMessage('Pipeline started. Waiting for updates...');
     } catch (error) {
-      console.error("Failed to generate content:", error);
-      const placeholderIds = newPlaceholders.map(p => p.id);
-      onUpdateContent(contentStore.filter(c => !placeholderIds.includes(c.id)));
-      setStatusMessage("Generation failed. Please try again.");
-    } finally {
+      console.error('Failed to start generation:', error);
       setIsGenerating(false);
+      setStatusMessage('Generation failed. Please try again.');
     }
   };
 
@@ -906,7 +835,28 @@ export const CampaignDetail: React.FC<CampaignDetailProps> = ({
            </div>
 
            <div className="p-4 mt-auto">
-             {statusMessage && (
+             {/* Pipeline progress */}
+             {jobStatus && isGenerating && (
+               <div className="mb-3 space-y-1.5">
+                 <div className="flex items-center justify-between text-xs">
+                   <span className="text-slate-600 font-medium">{jobStatus.phase}</span>
+                   <span className="text-slate-400">{jobStatus.progress}%</span>
+                 </div>
+                 <div className="w-full bg-slate-200 rounded-full h-1.5 overflow-hidden">
+                   <div
+                     className="bg-blue-600 h-1.5 rounded-full transition-all duration-500 ease-out"
+                     style={{ width: `${jobStatus.progress}%` }}
+                   />
+                 </div>
+                 {jobStatus.itemsTotal > 0 && (
+                   <div className="text-[10px] text-slate-400">
+                     {jobStatus.itemsCompleted}/{jobStatus.itemsTotal} items
+                     {jobStatus.retryCount > 0 && ` | ${jobStatus.retryCount} compliance retries`}
+                   </div>
+                 )}
+               </div>
+             )}
+             {statusMessage && !jobStatus && (
                <div className="mb-2 p-2 bg-blue-50 text-blue-700 text-xs rounded border border-blue-100 flex items-start animate-fadeIn">
                  <Info size={14} className="mr-1.5 mt-0.5 shrink-0" />
                  <span>{statusMessage}</span>
