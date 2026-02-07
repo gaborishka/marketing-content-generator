@@ -15,13 +15,15 @@ interface CanvasBoardProps {
   onItemsChange: (items: GeneratedContent[]) => void;
   onEdit?: (id: string) => void;
   onDoubleClick?: (id: string) => void;
+  onCanvasDoubleClick?: (canvasPos: { x: number; y: number }) => void;
+  onPasteOnCanvas?: (canvasPos: { x: number; y: number }, text?: string, imageDataUrl?: string) => void;
   brandName?: string;
   focusTarget?: { x: number; y: number; timestamp: number } | null;
 }
 
 const noopDelete = () => {};
 
-export const CanvasBoard: React.FC<CanvasBoardProps> = ({ items, onItemsChange, onEdit, onDoubleClick, brandName, focusTarget }) => {
+export const CanvasBoard: React.FC<CanvasBoardProps> = ({ items, onItemsChange, onEdit, onDoubleClick, onCanvasDoubleClick, onPasteOnCanvas, brandName, focusTarget }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   
   // Viewport State
@@ -50,6 +52,16 @@ export const CanvasBoard: React.FC<CanvasBoardProps> = ({ items, onItemsChange, 
     setOffset(targetOffset);
   }, [focusTarget]);
 
+  // Convert screen coordinates to canvas world coordinates
+  const screenToCanvas = (clientX: number, clientY: number) => {
+    const rect = containerRef.current?.getBoundingClientRect();
+    if (!rect) return { x: 0, y: 0 };
+    return {
+      x: (clientX - rect.left - offset.x) / scale,
+      y: (clientY - rect.top - offset.y) / scale,
+    };
+  };
+
   // Mouse Event Handlers for the Canvas (Background)
   const handleMouseDown = (e: React.MouseEvent) => {
     // If clicking on background
@@ -64,6 +76,15 @@ export const CanvasBoard: React.FC<CanvasBoardProps> = ({ items, onItemsChange, 
           setSelection([]);
         }
       }
+    }
+  };
+
+  // Double-click on empty canvas space → open content creation modal
+  const handleCanvasDoubleClick = (e: React.MouseEvent) => {
+    // Only trigger if clicking on the background (not a card)
+    if (onCanvasDoubleClick && e.target === e.currentTarget) {
+      const pos = screenToCanvas(e.clientX, e.clientY);
+      onCanvasDoubleClick(pos);
     }
   };
 
@@ -129,6 +150,60 @@ export const CanvasBoard: React.FC<CanvasBoardProps> = ({ items, onItemsChange, 
     el.addEventListener('wheel', handleWheel, { passive: false });
     return () => el.removeEventListener('wheel', handleWheel);
   }, []);
+
+  // Paste event handler — opens creation modal with pasted text or image
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el || !onPasteOnCanvas) return;
+
+    const handlePaste = (e: ClipboardEvent) => {
+      // Don't intercept paste when user is typing in an input/textarea
+      const active = document.activeElement;
+      if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || (active as HTMLElement).isContentEditable)) {
+        return;
+      }
+
+      let pastedText: string | undefined;
+      let pastedImageDataUrl: string | undefined;
+
+      // Check for image in clipboard
+      const items = e.clipboardData?.items;
+      if (items) {
+        for (const item of Array.from(items)) {
+          if (item.type.startsWith('image/')) {
+            const blob = item.getAsFile();
+            if (blob) {
+              const reader = new FileReader();
+              reader.onload = () => {
+                const canvasCenter = screenToCanvas(
+                  el.getBoundingClientRect().left + el.getBoundingClientRect().width / 2,
+                  el.getBoundingClientRect().top + el.getBoundingClientRect().height / 2
+                );
+                onPasteOnCanvas(canvasCenter, undefined, reader.result as string);
+              };
+              reader.readAsDataURL(blob);
+              e.preventDefault();
+              return;
+            }
+          }
+        }
+      }
+
+      // Check for text
+      pastedText = e.clipboardData?.getData('text/plain');
+      if (pastedText && pastedText.trim()) {
+        const canvasCenter = screenToCanvas(
+          el.getBoundingClientRect().left + el.getBoundingClientRect().width / 2,
+          el.getBoundingClientRect().top + el.getBoundingClientRect().height / 2
+        );
+        onPasteOnCanvas(canvasCenter, pastedText.trim(), undefined);
+        e.preventDefault();
+      }
+    };
+
+    document.addEventListener('paste', handlePaste);
+    return () => document.removeEventListener('paste', handlePaste);
+  }, [onPasteOnCanvas, offset, scale]);
 
   // Card Handlers
   const handleCardMouseDown = (e: React.MouseEvent, id: string) => {
@@ -230,13 +305,14 @@ export const CanvasBoard: React.FC<CanvasBoardProps> = ({ items, onItemsChange, 
       </div>
 
       {/* Canvas Area */}
-      <div 
+      <div
         ref={containerRef}
         className="flex-1 w-full h-full relative cursor-default"
         onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
         onMouseLeave={handleMouseUp}
+        onDoubleClick={handleCanvasDoubleClick}
         style={{
           backgroundImage: 'radial-gradient(#cbd5e1 1px, transparent 1px)',
           backgroundSize: `${20 * scale}px ${20 * scale}px`, // Dynamic grid based on scale

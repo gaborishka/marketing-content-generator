@@ -46,6 +46,7 @@ import { CanvasBoard } from './CanvasBoard';
 import { generateMarketingContent } from '../services/geminiService';
 import { VideoStoryboardModal } from './VideoStoryboardModal';
 import { ContentDetailModal } from './ContentDetailModal';
+import { ContentCreationModal } from './ContentCreationModal';
 
 interface CampaignDetailProps {
   campaigns: Campaign[];
@@ -104,6 +105,11 @@ export const CampaignDetail: React.FC<CampaignDetailProps> = ({
   const [detailContentId, setDetailContentId] = useState<string | null>(null);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [canvasFocusTarget, setCanvasFocusTarget] = useState<{ x: number; y: number; timestamp: number } | null>(null);
+  const [creationModal, setCreationModal] = useState<{
+    position: { x: number; y: number };
+    initialText?: string;
+    initialImageDataUrl?: string;
+  } | null>(null);
 
   const campaign = campaigns.find(c => c.id === id);
   const primaryProduct = products.find(p => p.id === campaign?.primaryProductId);
@@ -167,6 +173,18 @@ export const CampaignDetail: React.FC<CampaignDetailProps> = ({
   const handleCanvasUpdate = (updatedItems: GeneratedContent[]) => {
     const otherContent = contentStore.filter(c => c.campaignId !== id);
     onUpdateContent([...otherContent, ...updatedItems]);
+  };
+
+  const handleCanvasDoubleClick = (canvasPos: { x: number; y: number }) => {
+    setCreationModal({ position: canvasPos });
+  };
+
+  const handlePasteOnCanvas = (canvasPos: { x: number; y: number }, text?: string, imageDataUrl?: string) => {
+    setCreationModal({ position: canvasPos, initialText: text, initialImageDataUrl: imageDataUrl });
+  };
+
+  const handleManualContentCreate = (newContent: GeneratedContent) => {
+    onUpdateContent([...contentStore, newContent]);
   };
 
   const handleGenerateMore = async () => {
@@ -839,14 +857,24 @@ export const CampaignDetail: React.FC<CampaignDetailProps> = ({
         {/* Main Canvas Area */}
         <div className="flex-1 relative">
            {campaignContent.length === 0 && !isGenerating ? (
-             <div className="absolute inset-0 flex items-center justify-center">
+             <div
+               className="absolute inset-0 flex items-center justify-center cursor-pointer"
+               onDoubleClick={(e) => {
+                 const rect = e.currentTarget.getBoundingClientRect();
+                 handleCanvasDoubleClick({
+                   x: e.clientX - rect.left,
+                   y: e.clientY - rect.top,
+                 });
+               }}
+             >
                <div className="text-center max-w-md px-8">
                  <div className="inline-flex items-center justify-center w-16 h-16 bg-slate-100 rounded-full mb-4">
                    <MousePointerClick size={28} className="text-slate-400" />
                  </div>
-                 <h2 className="text-xl font-bold text-slate-700 mb-2">Ready to generate content</h2>
+                 <h2 className="text-xl font-bold text-slate-700 mb-2">Ready to create content</h2>
                  <p className="text-sm text-slate-500 mb-6">
-                   Select your target audiences and channels in the sidebar, then click "Generate New Variants" to populate the canvas with AI-generated content.
+                   <span className="font-semibold text-blue-600">Double-click</span> anywhere or <span className="font-semibold text-blue-600">paste</span> text/images to add content manually.
+                   Or select audiences and channels, then click "Generate New Variants" for AI generation.
                  </p>
                  <div className="flex items-center justify-center gap-3 text-xs">
                    <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full border ${
@@ -876,6 +904,8 @@ export const CampaignDetail: React.FC<CampaignDetailProps> = ({
                 onItemsChange={handleCanvasUpdate}
                 onEdit={(id) => setEditingContentId(id)}
                 onDoubleClick={(id) => setDetailContentId(id)}
+                onCanvasDoubleClick={handleCanvasDoubleClick}
+                onPasteOnCanvas={handlePasteOnCanvas}
                 brandName={brandName}
                 focusTarget={canvasFocusTarget}
              />
@@ -899,6 +929,19 @@ export const CampaignDetail: React.FC<CampaignDetailProps> = ({
             onUpdateItem(updated);
             setDetailContentId(null);
           }}
+        />
+      )}
+
+      {creationModal && campaign && (
+        <ContentCreationModal
+          campaignId={campaign.id}
+          onClose={() => setCreationModal(null)}
+          onCreate={handleManualContentCreate}
+          initialText={creationModal.initialText}
+          initialImageDataUrl={creationModal.initialImageDataUrl}
+          canvasPosition={creationModal.position}
+          existingChannels={campaign.channels}
+          existingAudiences={campaign.targetAudiences}
         />
       )}
     </div>
