@@ -1,12 +1,22 @@
-import React, { useState, useMemo } from 'react';
-import { Search, Plus, Tag, Pencil, Trash2, X, DollarSign, Package } from 'lucide-react';
-import { Product } from '../types';
+import React, { useState, useMemo, useEffect, useCallback } from 'react';
+import { Search, Plus, Tag, Pencil, Trash2, X, DollarSign, Package, RefreshCw, Link2, Unlink, Store, Loader2, CheckCircle2, AlertCircle } from 'lucide-react';
+import { Product, ShopifyConnection } from '../types';
+import {
+  startShopifyAuth,
+  completeShopifyAuth,
+  getShopifyConnection,
+  syncShopifyProducts,
+  disconnectShopify,
+  parseShopifyCallbackParams,
+  clearShopifyCallbackParams,
+} from '../services/shopifyService';
 
 interface ProductCatalogProps {
   products: Product[];
   onCreate: (product: Product) => void;
   onUpdate: (product: Product) => void;
   onDelete: (productId: string) => void;
+  onReloadProducts?: () => void;
 }
 
 interface ModalState {
@@ -43,11 +53,114 @@ interface ProductForm {
   marketingTags: string;
 }
 
-export const ProductCatalog: React.FC<ProductCatalogProps> = ({ products, onCreate, onUpdate, onDelete }) => {
+type SyncStatus = 'idle' | 'syncing' | 'success' | 'error';
+
+interface SyncResult {
+  synced: number;
+  created: number;
+  updated: number;
+  removed: number;
+}
+
+export const ProductCatalog: React.FC<ProductCatalogProps> = ({ products, onCreate, onUpdate, onDelete, onReloadProducts }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [modal, setModal] = useState<ModalState>({ open: false, editingProduct: null });
   const [deleteConfirm, setDeleteConfirm] = useState<DeleteConfirm | null>(null);
   const [form, setForm] = useState<ProductForm>(EMPTY_FORM);
+
+  // Shopify state
+  const [shopifyConnection, setShopifyConnection] = useState<ShopifyConnection | null>(null);
+  const [shopifyLoading, setShopifyLoading] = useState(true);
+  const [showShopifyConnect, setShowShopifyConnect] = useState(false);
+  const [shopDomain, setShopDomain] = useState('');
+  const [connectingShopify, setConnectingShopify] = useState(false);
+  const [syncStatus, setSyncStatus] = useState<SyncStatus>('idle');
+  const [syncResult, setSyncResult] = useState<SyncResult | null>(null);
+  const [shopifyError, setShopifyError] = useState<string | null>(null);
+  const [disconnectConfirm, setDisconnectConfirm] = useState(false);
+
+  // Load Shopify connection status on mount
+  useEffect(() => {
+    loadShopifyConnection();
+  }, []);
+
+  // Handle Shopify OAuth callback params in URL
+  useEffect(() => {
+    const params = parseShopifyCallbackParams();
+    if (params) {
+      handleShopifyCallback(params.shop, params.code, params.state);
+      clearShopifyCallbackParams();
+    }
+  }, []);
+
+  const loadShopifyConnection = useCallback(async () => {
+    try {
+      setShopifyLoading(true);
+      const conn = await getShopifyConnection();
+      setShopifyConnection(conn);
+    } catch (e) {
+      console.error('Failed to load Shopify connection:', e);
+    } finally {
+      setShopifyLoading(false);
+    }
+  }, []);
+
+  const handleShopifyCallback = async (shop: string, code: string, state: string) => {
+    try {
+      setConnectingShopify(true);
+      setShopifyError(null);
+      await completeShopifyAuth(shop, code, state);
+      await loadShopifyConnection();
+      setShowShopifyConnect(false);
+    } catch (e: any) {
+      setShopifyError(e.message || 'Failed to complete Shopify connection.');
+    } finally {
+      setConnectingShopify(false);
+    }
+  };
+
+  const handleConnectShopify = async () => {
+    if (!shopDomain.trim()) return;
+    try {
+      setConnectingShopify(true);
+      setShopifyError(null);
+      const { authUrl } = await startShopifyAuth(shopDomain.trim());
+      // Redirect the user to Shopify for authorization
+      window.location.href = authUrl;
+    } catch (e: any) {
+      setShopifyError(e.message || 'Failed to start Shopify connection.');
+      setConnectingShopify(false);
+    }
+  };
+
+  const handleSyncProducts = async () => {
+    try {
+      setSyncStatus('syncing');
+      setSyncResult(null);
+      setShopifyError(null);
+      const result = await syncShopifyProducts();
+      setSyncResult(result);
+      setSyncStatus('success');
+      // Reload products to reflect synced data
+      onReloadProducts?.();
+      // Refresh connection info (updates lastSyncedAt)
+      await loadShopifyConnection();
+    } catch (e: any) {
+      setShopifyError(e.message || 'Failed to sync products.');
+      setSyncStatus('error');
+    }
+  };
+
+  const handleDisconnectShopify = async () => {
+    try {
+      setShopifyError(null);
+      await disconnectShopify();
+      setShopifyConnection(null);
+      setDisconnectConfirm(false);
+    } catch (e: any) {
+      setShopifyError(e.message || 'Failed to disconnect Shopify.');
+    }
+  };
 
   const filteredProducts = useMemo(() => {
     if (!searchQuery.trim()) return products;
@@ -59,6 +172,11 @@ export const ProductCatalog: React.FC<ProductCatalogProps> = ({ products, onCrea
       p.category.toLowerCase().includes(q)
     );
   }, [products, searchQuery]);
+
+  const shopifyProductCount = useMemo(
+    () => products.filter(p => p.source === 'shopify').length,
+    [products]
+  );
 
   const openCreate = () => {
     setForm(EMPTY_FORM);
@@ -124,14 +242,165 @@ export const ProductCatalog: React.FC<ProductCatalogProps> = ({ products, onCrea
           <h1 className="text-2xl font-bold text-slate-900">Product Catalog</h1>
           <p className="text-slate-500">Manage your product information and assets.</p>
         </div>
-        <button
-          onClick={openCreate}
-          className="flex items-center justify-center space-x-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg transition-colors font-medium"
-        >
-          <Plus size={18} />
-          <span>Add Product</span>
-        </button>
+        <div className="flex items-center space-x-3">
+          {!shopifyConnection && !showShopifyConnect && (
+            <button
+              onClick={() => setShowShopifyConnect(true)}
+              className="flex items-center justify-center space-x-2 bg-[#96bf48] hover:bg-[#7a9e3a] text-white px-4 py-2 rounded-lg transition-colors font-medium"
+            >
+              <Store size={18} />
+              <span>Connect Shopify</span>
+            </button>
+          )}
+          <button
+            onClick={openCreate}
+            className="flex items-center justify-center space-x-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg transition-colors font-medium"
+          >
+            <Plus size={18} />
+            <span>Add Product</span>
+          </button>
+        </div>
       </div>
+
+      {/* Shopify Connection Panel */}
+      {shopifyConnection && (
+        <div className="bg-gradient-to-r from-[#96bf48]/10 to-[#5e8e3e]/10 border border-[#96bf48]/30 rounded-xl p-5">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div className="flex items-center space-x-4">
+              <div className="w-10 h-10 bg-[#96bf48] rounded-lg flex items-center justify-center flex-shrink-0">
+                <Store size={20} className="text-white" />
+              </div>
+              <div>
+                <div className="flex items-center space-x-2">
+                  <h3 className="font-semibold text-slate-900">Shopify Connected</h3>
+                  <span className="px-2 py-0.5 bg-green-100 text-green-700 text-xs rounded-full font-medium">Active</span>
+                </div>
+                <p className="text-sm text-slate-600">
+                  {shopifyConnection.shop}
+                  {shopifyConnection.productCount != null && (
+                    <span className="ml-2 text-slate-400">
+                      ({shopifyConnection.productCount} products synced)
+                    </span>
+                  )}
+                  {shopifyConnection.lastSyncedAt && (
+                    <span className="ml-2 text-slate-400">
+                      Last sync: {new Date(shopifyConnection.lastSyncedAt).toLocaleDateString()}
+                    </span>
+                  )}
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center space-x-2">
+              <button
+                onClick={handleSyncProducts}
+                disabled={syncStatus === 'syncing'}
+                className="flex items-center space-x-2 bg-[#96bf48] hover:bg-[#7a9e3a] text-white px-4 py-2 rounded-lg transition-colors font-medium text-sm disabled:opacity-50"
+              >
+                {syncStatus === 'syncing' ? (
+                  <Loader2 size={16} className="animate-spin" />
+                ) : (
+                  <RefreshCw size={16} />
+                )}
+                <span>{syncStatus === 'syncing' ? 'Syncing...' : 'Sync Products'}</span>
+              </button>
+              <button
+                onClick={() => setDisconnectConfirm(true)}
+                className="flex items-center space-x-2 text-slate-500 hover:text-red-600 px-3 py-2 rounded-lg hover:bg-red-50 transition-colors text-sm"
+                title="Disconnect Shopify"
+              >
+                <Unlink size={16} />
+              </button>
+            </div>
+          </div>
+
+          {/* Sync result message */}
+          {syncStatus === 'success' && syncResult && (
+            <div className="mt-3 flex items-center space-x-2 text-sm text-green-700 bg-green-50 rounded-lg px-3 py-2">
+              <CheckCircle2 size={16} />
+              <span>
+                Sync complete: {syncResult.created} new, {syncResult.updated} updated, {syncResult.removed} removed
+                ({syncResult.synced} total from Shopify)
+              </span>
+            </div>
+          )}
+
+          {syncStatus === 'error' && shopifyError && (
+            <div className="mt-3 flex items-center space-x-2 text-sm text-red-700 bg-red-50 rounded-lg px-3 py-2">
+              <AlertCircle size={16} />
+              <span>{shopifyError}</span>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Shopify Connect Modal */}
+      {showShopifyConnect && !shopifyConnection && (
+        <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-sm">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center space-x-3">
+              <div className="w-10 h-10 bg-[#96bf48] rounded-lg flex items-center justify-center">
+                <Store size={20} className="text-white" />
+              </div>
+              <div>
+                <h3 className="font-semibold text-slate-900">Connect your Shopify Store</h3>
+                <p className="text-sm text-slate-500">Import products directly from your Shopify catalog</p>
+              </div>
+            </div>
+            <button
+              onClick={() => { setShowShopifyConnect(false); setShopifyError(null); }}
+              className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg"
+            >
+              <X size={18} />
+            </button>
+          </div>
+
+          <div className="flex flex-col sm:flex-row gap-3">
+            <div className="relative flex-1">
+              <Link2 className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+              <input
+                type="text"
+                placeholder="yourstore.myshopify.com"
+                value={shopDomain}
+                onChange={(e) => setShopDomain(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && handleConnectShopify()}
+                className="w-full pl-10 pr-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-[#96bf48] focus:border-transparent outline-none"
+              />
+            </div>
+            <button
+              onClick={handleConnectShopify}
+              disabled={!shopDomain.trim() || connectingShopify}
+              className="flex items-center justify-center space-x-2 bg-[#96bf48] hover:bg-[#7a9e3a] text-white px-6 py-2 rounded-lg transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {connectingShopify ? (
+                <Loader2 size={18} className="animate-spin" />
+              ) : (
+                <Link2 size={18} />
+              )}
+              <span>{connectingShopify ? 'Connecting...' : 'Connect'}</span>
+            </button>
+          </div>
+
+          {shopifyError && (
+            <div className="mt-3 flex items-center space-x-2 text-sm text-red-600">
+              <AlertCircle size={16} />
+              <span>{shopifyError}</span>
+            </div>
+          )}
+
+          <p className="text-xs text-slate-400 mt-3">
+            You will be redirected to Shopify to authorize read access to your product catalog.
+            We only request <code className="bg-slate-100 px-1 rounded">read_products</code> permission.
+          </p>
+        </div>
+      )}
+
+      {/* Shopify Loading State */}
+      {shopifyLoading && (
+        <div className="flex items-center justify-center py-2 text-sm text-slate-400">
+          <Loader2 size={14} className="animate-spin mr-2" />
+          Checking Shopify connection...
+        </div>
+      )}
 
       <div className="flex flex-col sm:flex-row space-y-3 sm:space-y-0 sm:space-x-4">
         <div className="relative flex-1">
@@ -154,17 +423,28 @@ export const ProductCatalog: React.FC<ProductCatalogProps> = ({ products, onCrea
           </h3>
           <p className="text-slate-500 text-sm mb-6">
             {products.length === 0
-              ? 'Add your first product to start creating marketing campaigns.'
+              ? 'Add your first product manually or connect your Shopify store to import products.'
               : 'Try a different search term.'}
           </p>
           {products.length === 0 && (
-            <button
-              onClick={openCreate}
-              className="inline-flex items-center space-x-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg transition-colors font-medium"
-            >
-              <Plus size={18} />
-              <span>Add First Product</span>
-            </button>
+            <div className="flex items-center justify-center space-x-3">
+              <button
+                onClick={openCreate}
+                className="inline-flex items-center space-x-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg transition-colors font-medium"
+              >
+                <Plus size={18} />
+                <span>Add Product</span>
+              </button>
+              {!shopifyConnection && (
+                <button
+                  onClick={() => setShowShopifyConnect(true)}
+                  className="inline-flex items-center space-x-2 bg-[#96bf48] hover:bg-[#7a9e3a] text-white px-4 py-2 rounded-lg transition-colors font-medium"
+                >
+                  <Store size={18} />
+                  <span>Connect Shopify</span>
+                </button>
+              )}
+            </div>
           )}
         </div>
       ) : (
@@ -182,6 +462,14 @@ export const ProductCatalog: React.FC<ProductCatalogProps> = ({ products, onCrea
                     ${product.price}
                   </span>
                 </div>
+                {product.source === 'shopify' && (
+                  <div className="absolute top-2 left-2">
+                    <span className="bg-[#96bf48]/90 backdrop-blur-sm px-2 py-1 rounded-md text-xs font-bold text-white shadow-sm flex items-center space-x-1">
+                      <Store size={10} />
+                      <span>Shopify</span>
+                    </span>
+                  </div>
+                )}
               </div>
 
               <div className="p-5">
@@ -227,6 +515,13 @@ export const ProductCatalog: React.FC<ProductCatalogProps> = ({ products, onCrea
               </div>
             </div>
           ))}
+        </div>
+      )}
+
+      {/* Product count summary with Shopify info */}
+      {products.length > 0 && shopifyProductCount > 0 && (
+        <div className="text-center text-xs text-slate-400 pt-2">
+          {products.length} total products ({shopifyProductCount} from Shopify, {products.length - shopifyProductCount} manual)
         </div>
       )}
 
@@ -402,6 +697,40 @@ export const ProductCatalog: React.FC<ProductCatalogProps> = ({ products, onCrea
                 className="px-4 py-2 text-sm font-medium text-white bg-red-600 rounded-lg hover:bg-red-700 transition-colors"
               >
                 Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Shopify Disconnect Confirmation Modal */}
+      {disconnectConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm mx-4 p-6">
+            <div className="flex items-center space-x-3 mb-4">
+              <div className="w-10 h-10 bg-orange-100 rounded-full flex items-center justify-center">
+                <Unlink size={18} className="text-orange-600" />
+              </div>
+              <h2 className="text-lg font-bold text-slate-900">Disconnect Shopify</h2>
+            </div>
+            <p className="text-sm text-slate-600 mb-2">
+              Disconnect from <span className="font-medium">{shopifyConnection?.shop}</span>?
+            </p>
+            <p className="text-sm text-slate-500 mb-6">
+              Products already synced will remain in your catalog, but you won't be able to sync new changes from Shopify until you reconnect.
+            </p>
+            <div className="flex items-center justify-end space-x-3">
+              <button
+                onClick={() => setDisconnectConfirm(false)}
+                className="px-4 py-2 text-sm font-medium text-slate-600 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleDisconnectShopify}
+                className="px-4 py-2 text-sm font-medium text-white bg-orange-600 rounded-lg hover:bg-orange-700 transition-colors"
+              >
+                Disconnect
               </button>
             </div>
           </div>

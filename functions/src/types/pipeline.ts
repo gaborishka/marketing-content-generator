@@ -150,6 +150,41 @@ export interface ProductDoc {
   imageUrl: string;
   complianceFiles: string[];
   marketingTags: string[];
+  source?: "manual" | "shopify";
+  shopifyProductId?: string;
+  shopifyVariantId?: string;
+}
+
+// ── Shopify Integration ───────────────────────────────────────────────────────
+
+export interface ShopifyConnectionDoc {
+  userId: string;
+  shop: string;
+  accessToken: string;
+  scope: string;
+  installedAt: FirebaseFirestore.Timestamp;
+  lastSyncedAt?: FirebaseFirestore.Timestamp;
+  productCount?: number;
+}
+
+export interface ShopifyProduct {
+  id: number;
+  title: string;
+  body_html: string;
+  vendor: string;
+  product_type: string;
+  tags: string;
+  image?: { src: string };
+  images?: { src: string }[];
+  variants?: ShopifyVariant[];
+}
+
+export interface ShopifyVariant {
+  id: number;
+  product_id: number;
+  title: string;
+  sku: string;
+  price: string;
 }
 
 export interface ComplianceRuleDoc {

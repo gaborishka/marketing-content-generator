@@ -15,6 +15,17 @@ export interface Product {
   imageUrl: string;
   complianceFiles: string[];
   marketingTags: string[];
+  source?: 'manual' | 'shopify';
+  shopifyProductId?: string;
+  shopifyVariantId?: string;
+}
+
+// Shopify Integration
+export interface ShopifyConnection {
+  shop: string;
+  scope: string;
+  lastSyncedAt?: string;
+  productCount?: number;
 }
 
 // Compliance Rules

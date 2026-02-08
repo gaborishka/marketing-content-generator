@@ -446,6 +446,10 @@ function App() {
               onCreate={handleProductCreate}
               onUpdate={handleProductUpdate}
               onDelete={handleProductDelete}
+              onReloadProducts={async () => {
+                const dbProducts = await storage.getAll<Product>('products');
+                if (dbProducts.length > 0) setProducts(dbProducts);
+              }}
             />
           } />
           <Route

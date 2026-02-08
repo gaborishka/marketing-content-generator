@@ -3,6 +3,7 @@ import { onDocumentCreated } from "firebase-functions/v2/firestore";
 import { GoogleGenAI, Type, VideoGenerationReferenceType } from "@google/genai";
 import { initializeApp } from "firebase-admin/app";
 import { getStorage } from "firebase-admin/storage";
+import { getFirestore } from "firebase-admin/firestore";
 import { randomUUID } from "crypto";
 import { join } from "path";
 import { readFile, unlink } from "fs/promises";
@@ -284,6 +285,18 @@ export const generateVideo = onCall(
 
 import { createJobIfNoActive, updateJobDoc } from "./utils/firestore";
 import { runOrchestrator } from "./agents/orchestrator";
+import {
+  SHOPIFY_API_KEY as SHOPIFY_KEY,
+  SHOPIFY_API_SECRET as SHOPIFY_SECRET,
+  buildAuthUrl,
+  exchangeCodeForToken,
+  saveConnection,
+  getConnection,
+  deleteConnection,
+  syncProductsToFirestore,
+  sanitizeShop,
+  verifyHmac,
+} from "./utils/shopify";
 
 interface GenerateCampaignInput {
   campaignId: string;
@@ -379,5 +392,282 @@ export const processGenerationJob = onDocumentCreated(
       }
       // Note: clearJobLock is handled by the orchestrator's finally block
     }
+  }
+);
+
+// ── Shopify Integration ──────────────────────────────────────────────────────
+
+import { onRequest } from "firebase-functions/v2/https";
+
+const SHOPIFY_SCOPES = [
+  "read_products",
+  "read_product_images",
+  "read_product_listings",
+];
+
+interface ShopifyAuthInput {
+  shop: string;
+  redirectUri: string;
+}
+
+// Returns the Shopify OAuth authorization URL for the user to visit.
+export const shopifyGetAuthUrl = onCall(
+  { timeoutSeconds: 10, memory: "256MiB", secrets: [SHOPIFY_KEY], cors: true },
+  async (request) => {
+    if (!request.auth) {
+      throw new HttpsError("unauthenticated", "Authentication required.");
+    }
+
+    const { shop, redirectUri } = request.data as ShopifyAuthInput;
+    if (!shop || typeof shop !== "string") {
+      throw new HttpsError("invalid-argument", "shop is required.");
+    }
+    if (!redirectUri || typeof redirectUri !== "string") {
+      throw new HttpsError("invalid-argument", "redirectUri is required.");
+    }
+
+    try {
+      // Generate a random nonce for CSRF protection
+      const state = `${request.auth.uid}:${randomUUID()}`;
+
+      // Store the state in Firestore so we can verify it on callback
+      await getFirestore()
+        .collection("shopifyOAuthStates")
+        .doc(state)
+        .set({
+          userId: request.auth.uid,
+          shop: sanitizeShop(shop),
+          createdAt: new Date(),
+          // Expire after 10 minutes
+          expiresAt: new Date(Date.now() + 10 * 60 * 1000),
+        });
+
+      const authUrl = buildAuthUrl(shop, redirectUri, state, SHOPIFY_SCOPES);
+
+      return { authUrl, state };
+    } catch (error: any) {
+      console.error("shopifyGetAuthUrl error:", error);
+      throw new HttpsError("internal", error.message || "Failed to generate auth URL.");
+    }
+  }
+);
+
+// HTTP endpoint that Shopify redirects to after the merchant approves.
+// Exchanges the authorization code for an access token and stores the connection.
+export const shopifyOAuthCallback = onRequest(
+  {
+    timeoutSeconds: 30,
+    memory: "256MiB",
+    secrets: [SHOPIFY_KEY, SHOPIFY_SECRET],
+    cors: true,
+  },
+  async (req, res) => {
+    try {
+      const { code, shop, state, hmac } = req.query as Record<string, string>;
+
+      if (!code || !shop || !state) {
+        res.status(400).json({ error: "Missing required query parameters." });
+        return;
+      }
+
+      // Verify HMAC if present
+      if (hmac) {
+        const params = req.query as Record<string, string>;
+        const valid = await verifyHmac(params, SHOPIFY_SECRET.value());
+        if (!valid) {
+          res.status(403).json({ error: "HMAC verification failed." });
+          return;
+        }
+      }
+
+      // Verify state exists and hasn't expired
+      const stateDoc = await getFirestore()
+        .collection("shopifyOAuthStates")
+        .doc(state)
+        .get();
+
+      if (!stateDoc.exists) {
+        res.status(400).json({ error: "Invalid or expired state parameter." });
+        return;
+      }
+
+      const stateData = stateDoc.data()!;
+      const expiresAt = stateData.expiresAt?.toDate?.() || stateData.expiresAt;
+      if (new Date() > new Date(expiresAt)) {
+        await stateDoc.ref.delete();
+        res.status(400).json({ error: "OAuth state expired. Please try again." });
+        return;
+      }
+
+      const userId = stateData.userId as string;
+
+      // Exchange code for token
+      const { accessToken, scope } = await exchangeCodeForToken(shop, code);
+
+      // Save connection
+      await saveConnection(userId, shop, accessToken, scope);
+
+      // Clean up state doc
+      await stateDoc.ref.delete();
+
+      // Redirect back to the app's products page
+      const appUrl =
+        stateData.redirectOrigin ||
+        req.headers.referer ||
+        "/";
+      // Redirect to the app with a success indicator
+      const redirectUrl = `${appUrl}#/products?shopify=connected&shop=${encodeURIComponent(sanitizeShop(shop))}`;
+      res.redirect(303, redirectUrl);
+    } catch (error: any) {
+      console.error("shopifyOAuthCallback error:", error);
+      res.status(500).json({
+        error: error.message || "OAuth callback failed.",
+      });
+    }
+  }
+);
+
+// Exchange an authorization code for an access token (client-side callback flow).
+// This is used when the frontend handles the Shopify redirect directly.
+interface ShopifyExchangeTokenInput {
+  shop: string;
+  code: string;
+  state: string;
+}
+
+export const shopifyExchangeToken = onCall(
+  {
+    timeoutSeconds: 30,
+    memory: "256MiB",
+    secrets: [SHOPIFY_KEY, SHOPIFY_SECRET],
+    cors: true,
+  },
+  async (request) => {
+    if (!request.auth) {
+      throw new HttpsError("unauthenticated", "Authentication required.");
+    }
+
+    const { shop, code, state } = request.data as ShopifyExchangeTokenInput;
+    if (!shop || !code || !state) {
+      throw new HttpsError(
+        "invalid-argument",
+        "shop, code, and state are required."
+      );
+    }
+
+    // Verify state
+    const stateDoc = await getFirestore()
+      .collection("shopifyOAuthStates")
+      .doc(state)
+      .get();
+
+    if (!stateDoc.exists) {
+      throw new HttpsError(
+        "invalid-argument",
+        "Invalid or expired state parameter."
+      );
+    }
+
+    const stateData = stateDoc.data()!;
+    if (stateData.userId !== request.auth.uid) {
+      throw new HttpsError("permission-denied", "State does not match user.");
+    }
+
+    const expiresAt = stateData.expiresAt?.toDate?.() || stateData.expiresAt;
+    if (new Date() > new Date(expiresAt)) {
+      await stateDoc.ref.delete();
+      throw new HttpsError(
+        "deadline-exceeded",
+        "OAuth state expired. Please try again."
+      );
+    }
+
+    try {
+      const { accessToken, scope } = await exchangeCodeForToken(shop, code);
+      await saveConnection(request.auth.uid, shop, accessToken, scope);
+      await stateDoc.ref.delete();
+
+      return { success: true, shop: sanitizeShop(shop), scope };
+    } catch (error: any) {
+      console.error("shopifyExchangeToken error:", error);
+      throw new HttpsError(
+        "internal",
+        error.message || "Failed to exchange token."
+      );
+    }
+  }
+);
+
+// Get the current user's Shopify connection status.
+export const shopifyGetConnection = onCall(
+  { timeoutSeconds: 10, memory: "256MiB", cors: true },
+  async (request) => {
+    if (!request.auth) {
+      throw new HttpsError("unauthenticated", "Authentication required.");
+    }
+
+    const connection = await getConnection(request.auth.uid);
+    if (!connection) {
+      return { connected: false };
+    }
+
+    return {
+      connected: true,
+      shop: connection.shop,
+      scope: connection.scope,
+      lastSyncedAt: connection.lastSyncedAt?.toDate?.()?.toISOString() || null,
+      productCount: connection.productCount || 0,
+    };
+  }
+);
+
+// Sync products from the connected Shopify store.
+export const shopifySyncProducts = onCall(
+  {
+    timeoutSeconds: 120,
+    memory: "512MiB",
+    secrets: [SHOPIFY_KEY],
+    cors: true,
+  },
+  async (request) => {
+    if (!request.auth) {
+      throw new HttpsError("unauthenticated", "Authentication required.");
+    }
+
+    const connection = await getConnection(request.auth.uid);
+    if (!connection) {
+      throw new HttpsError(
+        "failed-precondition",
+        "No Shopify store connected. Please connect your store first."
+      );
+    }
+
+    try {
+      const result = await syncProductsToFirestore(
+        request.auth.uid,
+        connection.shop,
+        connection.accessToken
+      );
+      return result;
+    } catch (error: any) {
+      console.error("shopifySyncProducts error:", error);
+      throw new HttpsError(
+        "internal",
+        error.message || "Failed to sync products from Shopify."
+      );
+    }
+  }
+);
+
+// Disconnect the Shopify store (removes access token but keeps synced products).
+export const shopifyDisconnect = onCall(
+  { timeoutSeconds: 10, memory: "256MiB", cors: true },
+  async (request) => {
+    if (!request.auth) {
+      throw new HttpsError("unauthenticated", "Authentication required.");
+    }
+
+    await deleteConnection(request.auth.uid);
+    return { success: true };
   }
 );
