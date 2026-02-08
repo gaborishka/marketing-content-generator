@@ -797,7 +797,9 @@ export const CampaignDetail: React.FC<CampaignDetailProps> = ({
 
            {/* Section: Compliance Rule */}
            <div className="p-4 border-b border-slate-100">
-             <label className="text-xs font-semibold text-slate-500 uppercase block mb-2">Compliance Rule</label>
+             <div className="flex items-center justify-between mb-2">
+               <label className="text-xs font-semibold text-slate-500 uppercase block">Compliance Rule</label>
+             </div>
              {complianceRule ? (
                <div className="flex items-center justify-between bg-green-50 border border-green-200 rounded-lg p-2.5">
                  <div className="flex items-center space-x-2 min-w-0">

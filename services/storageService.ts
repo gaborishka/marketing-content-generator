@@ -35,11 +35,18 @@ export const cancelDebouncedPut = (storeName: string, id: string): void => {
 export const getAll = async <T>(storeName: string): Promise<T[]> => {
   try {
     const userId = getUserId();
+    if (!userId) {
+      console.warn(`[Storage] No user ID for getAll('${storeName}')`);
+      return [];
+    }
+    console.log(`[Storage] Fetching all ${storeName} for userId: ${userId}`);
     const q = query(collection(db, storeName), where('userId', '==', userId));
     const snapshot = await getDocs(q);
-    return snapshot.docs.map((d) => d.data() as T);
+    const results = snapshot.docs.map((d) => d.data() as T);
+    console.log(`[Storage] Retrieved ${results.length} ${storeName} documents`);
+    return results;
   } catch (e) {
-    console.error(`Error getting all from ${storeName}`, e);
+    console.error(`[Storage] Error getting all from ${storeName}:`, e);
     return [];
   }
 };
@@ -47,7 +54,11 @@ export const getAll = async <T>(storeName: string): Promise<T[]> => {
 export const put = async (storeName: string, item: any): Promise<void> => {
   try {
     const userId = getUserId();
+    if (!userId) {
+      throw new Error('User not authenticated - cannot save to Firestore');
+    }
     const sanitized = JSON.parse(JSON.stringify({ ...item, userId }));
+    console.log(`[Storage] Saving ${storeName}/${item.id} with userId: ${userId}`);
     await setDoc(doc(db, storeName, item.id), sanitized);
   } catch (e) {
     console.error(`Error putting to ${storeName}`, e);

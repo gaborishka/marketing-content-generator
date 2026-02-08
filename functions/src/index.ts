@@ -282,8 +282,11 @@ export const generateVideo = onCall(
 // Quick onCall trigger: validates input, creates a job doc, returns { jobId }.
 // The actual pipeline runs asynchronously via processGenerationJob below.
 
-import { createJobIfNoActive, updateJobDoc } from "./utils/firestore";
+import { createJobIfNoActive, updateJobDoc, getContentForCampaign, getComplianceRule, getCampaignsForUser } from "./utils/firestore";
 import { runOrchestrator } from "./agents/orchestrator";
+import { runComplianceCheck } from "./agents/compliance";
+import { getFirestore, FieldValue } from "firebase-admin/firestore";
+import { ComplianceResult, ComplianceRuleDoc } from "./types/pipeline";
 
 interface GenerateCampaignInput {
   campaignId: string;
@@ -378,6 +381,271 @@ export const processGenerationJob = onDocumentCreated(
         console.error(`Failed to mark job ${jobId} as failed after unhandled error`);
       }
       // Note: clearJobLock is handled by the orchestrator's finally block
+    }
+  }
+);
+
+// ── checkCompliance ──────────────────────────────────────────────────────────
+// Standalone compliance checking for existing content items or campaigns
+
+interface CheckComplianceInput {
+  contentIds?: string[];      // Specific content items to check (optional)
+  campaignId?: string;         // Check all content in a campaign (optional)
+  ruleId: string;              // Compliance rule to check against
+}
+
+export const checkCompliance = onCall(
+  { timeoutSeconds: 300, memory: "512MiB", secrets: [GEMINI_API_KEY], cors: true },
+  async (request) => {
+    if (!request.auth) {
+      throw new HttpsError("unauthenticated", "Authentication required.");
+    }
+
+    const { contentIds, campaignId, ruleId } = request.data as CheckComplianceInput;
+    const userId = request.auth.uid;
+
+    // Validate input
+    if (!ruleId || typeof ruleId !== "string") {
+      throw new HttpsError("invalid-argument", "ruleId is required.");
+    }
+
+    if (!contentIds && !campaignId) {
+      throw new HttpsError("invalid-argument", "Either contentIds or campaignId must be provided.");
+    }
+
+    if (contentIds && campaignId) {
+      throw new HttpsError("invalid-argument", "Provide either contentIds or campaignId, not both.");
+    }
+
+    try {
+      // Fetch compliance rule
+      const rule = await getComplianceRule(ruleId);
+      if (!rule) {
+        throw new HttpsError("not-found", "Compliance rule not found.");
+      }
+
+      if (rule.userId !== userId) {
+        throw new HttpsError("permission-denied", "You don't have access to this compliance rule.");
+      }
+
+      // Fetch content items
+      let contentDocs: any[] = [];
+
+      if (contentIds) {
+        // Fetch specific content items
+        const db = getFirestore();
+        const contentRef = db.collection("content");
+        
+        for (const contentId of contentIds) {
+          const doc = await contentRef.doc(contentId).get();
+          if (doc.exists) {
+            const data = doc.data();
+            if (data?.userId === userId) {
+              contentDocs.push({ id: doc.id, ...data });
+            }
+          }
+        }
+
+        if (contentDocs.length === 0) {
+          throw new HttpsError("not-found", "No accessible content items found.");
+        }
+      } else if (campaignId) {
+        // Fetch all content for campaign
+        contentDocs = await getContentForCampaign(campaignId, userId);
+        
+        if (contentDocs.length === 0) {
+          throw new HttpsError("not-found", "No content found for this campaign.");
+        }
+      }
+
+      // Run compliance check
+      const result = await runComplianceCheck(
+        contentDocs,
+        rule.name,
+        rule.ruleText,
+        0 // retryAttempt = 0 for standalone checks
+      );
+
+      if (!result.success) {
+        throw new HttpsError("internal", result.error || "Compliance check failed.");
+      }
+
+      // Return summary
+      const passed = result.data?.filter(r => r.pass).length || 0;
+      const failed = result.data?.filter(r => !r.pass).length || 0;
+      const total = result.data?.length || 0;
+
+      return {
+        success: true,
+        total,
+        passed,
+        failed,
+        results: result.data,
+      };
+    } catch (error: any) {
+      if (error instanceof HttpsError) {
+        throw error;
+      }
+      console.error("checkCompliance error:", error);
+      throw new HttpsError("internal", error.message || "Failed to check compliance.");
+    }
+  }
+);
+
+// ── analyzeCampaignsCompliance ─────────────────────────────────────────────────
+// Analyzes all campaigns against selected compliance rules and stores results
+
+interface AnalyzeCampaignsInput {
+  ruleIds: string[];  // Array of compliance rule IDs to check against
+}
+
+interface CampaignAnalysisResult {
+  campaignId: string;
+  campaignName: string;
+  ruleId: string;
+  ruleName: string;
+  totalContent: number;
+  passed: number;
+  failed: number;
+  averageScore: number;
+  minScore: number;
+  maxScore: number;
+  results: any[];
+  analyzedAt: string;
+}
+
+export const analyzeCampaignsCompliance = onCall(
+  { timeoutSeconds: 600, memory: "1GiB", secrets: [GEMINI_API_KEY], cors: true },
+  async (request) => {
+    if (!request.auth) {
+      throw new HttpsError("unauthenticated", "Authentication required.");
+    }
+
+    const { ruleIds } = request.data as AnalyzeCampaignsInput;
+    const userId = request.auth.uid;
+
+    if (!ruleIds || !Array.isArray(ruleIds) || ruleIds.length === 0) {
+      throw new HttpsError("invalid-argument", "ruleIds array is required.");
+    }
+
+    try {
+      // Fetch all campaigns for user
+      const campaigns = await getCampaignsForUser(userId);
+      
+      if (campaigns.length === 0) {
+        return {
+          success: true,
+          results: [],
+          message: "No campaigns found to analyze.",
+        };
+      }
+
+      // Fetch all compliance rules
+      const rules = await Promise.all(
+        ruleIds.map(ruleId => getComplianceRule(ruleId))
+      );
+
+      const validRules = rules.filter((rule): rule is ComplianceRuleDoc => 
+        rule !== null && rule.userId === userId
+      );
+
+      if (validRules.length === 0) {
+        throw new HttpsError("not-found", "No valid compliance rules found.");
+      }
+
+      const analysisResults: CampaignAnalysisResult[] = [];
+      const db = getFirestore();
+      const analyticsRef = db.collection("campaignComplianceAnalytics");
+
+      // Analyze each campaign against each rule
+      for (const campaign of campaigns) {
+        // Get all content for this campaign
+        const contentDocs = await getContentForCampaign(campaign.id, userId);
+        
+        if (contentDocs.length === 0) {
+          // Skip campaigns with no content
+          continue;
+        }
+
+        for (const rule of validRules) {
+          if (!rule) continue; // Skip null rules
+          
+          // Run compliance check
+          const complianceResult = await runComplianceCheck(
+            contentDocs,
+            rule.name,
+            rule.ruleText,
+            0
+          );
+
+          if (!complianceResult.success || !complianceResult.data) {
+            continue;
+          }
+
+          const results = complianceResult.data;
+          const passed = results.filter((r: any) => r.pass).length;
+          const failed = results.filter((r: any) => !r.pass).length;
+          const scores = results.map((r: any) => r.score);
+          const averageScore = scores.length > 0 
+            ? Math.round(scores.reduce((a: number, b: number) => a + b, 0) / scores.length)
+            : 0;
+          const minScore = scores.length > 0 ? Math.min(...scores) : 0;
+          const maxScore = scores.length > 0 ? Math.max(...scores) : 0;
+
+          const analysis: CampaignAnalysisResult = {
+            campaignId: campaign.id,
+            campaignName: campaign.name,
+            ruleId: rule.id,
+            ruleName: rule.name,
+            totalContent: results.length,
+            passed,
+            failed,
+            averageScore,
+            minScore,
+            maxScore,
+            results,
+            analyzedAt: new Date().toISOString(),
+          };
+
+          analysisResults.push(analysis);
+
+          // Store result in Firestore
+          const docId = `${campaign.id}_${rule.id}_${Date.now()}`;
+          await analyticsRef.doc(docId).set({
+            userId,
+            ...analysis,
+            createdAt: FieldValue.serverTimestamp(),
+          });
+        }
+      }
+
+      // Calculate summary statistics
+      const totalCampaigns = new Set(analysisResults.map(r => r.campaignId)).size;
+      const totalContent = analysisResults.reduce((sum, r) => sum + r.totalContent, 0);
+      const totalPassed = analysisResults.reduce((sum, r) => sum + r.passed, 0);
+      const totalFailed = analysisResults.reduce((sum, r) => sum + r.failed, 0);
+      const overallAverage = analysisResults.length > 0
+        ? Math.round(analysisResults.reduce((sum, r) => sum + r.averageScore, 0) / analysisResults.length)
+        : 0;
+
+      return {
+        success: true,
+        summary: {
+          totalCampaigns,
+          totalRules: validRules.length,
+          totalContent,
+          totalPassed,
+          totalFailed,
+          overallAverage,
+        },
+        results: analysisResults,
+      };
+    } catch (error: any) {
+      if (error instanceof HttpsError) {
+        throw error;
+      }
+      console.error("analyzeCampaignsCompliance error:", error);
+      throw new HttpsError("internal", error.message || "Failed to analyze campaigns.");
     }
   }
 );

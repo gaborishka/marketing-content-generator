@@ -8,6 +8,7 @@ import { CampaignList } from './components/CampaignList';
 import { ContentGenerator } from './components/ContentGenerator';
 import { CampaignDetail } from './components/CampaignDetail';
 import { ComplianceRules } from './components/ComplianceRules';
+import { ComplianceAnalytics } from './components/ComplianceAnalytics';
 import { BrandManager } from './components/BrandManager';
 import { Product, Campaign, GeneratedContent, ComplianceRule, Brand } from './types';
 import { Loader2 } from 'lucide-react';
@@ -171,8 +172,12 @@ function App() {
       setIsLoadingData(false);
       return;
     }
+    
+    console.log('[App] Loading data for user:', currentUser.uid);
+    
     const loadData = async () => {
       try {
+        console.log('[App] Fetching data from Firestore...');
         const [dbProducts, dbCampaigns, dbContent, dbComplianceRules, dbBrands] = await Promise.all([
           storage.getAll<Product>('products'),
           storage.getAll<Campaign>('campaigns'),
@@ -181,8 +186,17 @@ function App() {
           storage.getAll<Brand>('brands')
         ]);
 
+        console.log('[App] Data fetched:', {
+          products: dbProducts.length,
+          campaigns: dbCampaigns.length,
+          content: dbContent.length,
+          rules: dbComplianceRules.length,
+          brands: dbBrands.length,
+        });
+
         if (dbProducts.length === 0) {
           // Seed DB with mock data if empty
+          console.log('[App] Seeding products...');
           await Promise.all(MOCK_PRODUCTS.map(p => storage.put('products', p)));
           setProducts(MOCK_PRODUCTS);
         } else {
@@ -190,6 +204,7 @@ function App() {
         }
 
         if (dbCampaigns.length === 0) {
+          console.log('[App] Seeding campaigns...');
           await Promise.all(MOCK_CAMPAIGNS.map(c => storage.put('campaigns', c)));
           setCampaigns(MOCK_CAMPAIGNS);
         } else {
@@ -200,13 +215,16 @@ function App() {
         setBrands(dbBrands);
 
         if (dbContent.length === 0) {
+          console.log('[App] Seeding content...');
           await Promise.all(INITIAL_CONTENT.map(c => storage.put('content', c)));
           setContentStore(INITIAL_CONTENT);
         } else {
           setContentStore(dbContent.filter(c => c.status !== 'generating'));
         }
+        
+        console.log('[App] Data loading complete');
       } catch (e) {
-        console.error("Failed to load data from storage", e);
+        console.error("[App] Failed to load data from storage", e);
         // Fallback to mocks in memory if DB fails
         setProducts(MOCK_PRODUCTS);
         setCampaigns(MOCK_CAMPAIGNS);
@@ -467,6 +485,17 @@ function App() {
                 onCreate={handleComplianceRuleCreate}
                 onUpdate={handleComplianceRuleUpdate}
                 onDelete={handleComplianceRuleDelete}
+                campaigns={campaigns}
+                contentItems={contentStore}
+              />
+            }
+          />
+          <Route
+            path="/compliance-analytics"
+            element={
+              <ComplianceAnalytics
+                rules={complianceRules}
+                campaigns={campaigns}
               />
             }
           />

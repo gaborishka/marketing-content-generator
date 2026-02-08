@@ -1,7 +1,12 @@
 
-import React, { useState } from 'react';
-import { Plus, X, ShieldCheck, FileText, Pencil, Trash2, Upload } from 'lucide-react';
-import { ComplianceRule } from '../types';
+import React, { useState, useEffect } from 'react';
+import { Plus, X, ShieldCheck, FileText, Pencil, Trash2, Upload, BarChart3, CheckCircle, XCircle, TrendingUp, Loader2, ExternalLink, Save } from 'lucide-react';
+import { Link, useNavigate } from 'react-router-dom';
+import { ComplianceRule, Campaign } from '../types';
+import { COMPLIANCE_TEMPLATES, ComplianceTemplate } from '../data/complianceTemplates';
+import { ComplianceChecker } from './ComplianceChecker';
+import { analyzeCampaignsCompliance, CampaignAnalysisResult, CampaignAnalysisResponse } from '../services/orchestrationService';
+import { getAllAnalytics, AnalyticsDoc } from '../services/analyticsStorage';
 
 interface ComplianceRulesProps {
   rules: ComplianceRule[];
@@ -13,6 +18,7 @@ interface ComplianceRulesProps {
 interface ModalState {
   open: boolean;
   editingRule: ComplianceRule | null;
+  template: ComplianceTemplate | null;
 }
 
 interface DeleteConfirm {
@@ -20,20 +26,94 @@ interface DeleteConfirm {
   ruleName: string;
 }
 
-export const ComplianceRules: React.FC<ComplianceRulesProps> = ({ rules, onCreate, onUpdate, onDelete }) => {
-  const [modal, setModal] = useState<ModalState>({ open: false, editingRule: null });
+export const ComplianceRules: React.FC<ComplianceRulesProps> = ({ rules, onCreate, onUpdate, onDelete, campaigns = [], contentItems = [] }) => {
+  const navigate = useNavigate();
+  const [modal, setModal] = useState<ModalState>({ open: false, editingRule: null, template: null });
   const [deleteConfirm, setDeleteConfirm] = useState<DeleteConfirm | null>(null);
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [ruleText, setRuleText] = useState('');
   const [sourceFileName, setSourceFileName] = useState<string | undefined>(undefined);
+  
+  // Campaign Analysis State
+  const [selectedRuleIds, setSelectedRuleIds] = useState<Set<string>>(new Set());
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [analysisResults, setAnalysisResults] = useState<CampaignAnalysisResponse | null>(null);
+  const [analysisError, setAnalysisError] = useState<string | null>(null);
+  const [isLoadingAnalytics, setIsLoadingAnalytics] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+
+  // Load saved analytics on mount
+  useEffect(() => {
+    const loadSavedAnalytics = async () => {
+      try {
+        setIsLoadingAnalytics(true);
+        const savedAnalytics = await getAllAnalytics();
+        
+        if (savedAnalytics.length > 0) {
+          // Group analytics by campaign and rule
+          const groupedResults: CampaignAnalysisResult[] = savedAnalytics.map((doc: AnalyticsDoc) => ({
+            campaignId: doc.campaignId,
+            campaignName: doc.campaignName,
+            ruleId: doc.ruleId,
+            ruleName: doc.ruleName,
+            totalContent: doc.totalContent,
+            passed: doc.passed,
+            failed: doc.failed,
+            averageScore: doc.averageScore,
+            minScore: doc.minScore,
+            maxScore: doc.maxScore,
+            results: doc.results,
+            analyzedAt: doc.analyzedAt,
+          }));
+
+          // Calculate summary
+          const totalCampaigns = new Set(groupedResults.map(r => r.campaignId)).size;
+          const totalRules = new Set(groupedResults.map(r => r.ruleId)).size;
+          const totalContent = groupedResults.reduce((sum, r) => sum + r.totalContent, 0);
+          const totalPassed = groupedResults.reduce((sum, r) => sum + r.passed, 0);
+          const totalFailed = groupedResults.reduce((sum, r) => sum + r.failed, 0);
+          const overallAverage = groupedResults.length > 0
+            ? Math.round(groupedResults.reduce((sum, r) => sum + r.averageScore, 0) / groupedResults.length)
+            : 0;
+
+          setAnalysisResults({
+            success: true,
+            summary: {
+              totalCampaigns,
+              totalRules,
+              totalContent,
+              totalPassed,
+              totalFailed,
+              overallAverage,
+            },
+            results: groupedResults,
+          });
+        }
+      } catch (error) {
+        console.error('Failed to load saved analytics:', error);
+      } finally {
+        setIsLoadingAnalytics(false);
+      }
+    };
+
+    loadSavedAnalytics();
+  }, []);
 
   const openCreate = () => {
     setName('');
     setDescription('');
     setRuleText('');
     setSourceFileName(undefined);
-    setModal({ open: true, editingRule: null });
+    setModal({ open: true, editingRule: null, template: null });
+  };
+
+  const openCreateFromTemplate = (template: ComplianceTemplate) => {
+    setName(template.name);
+    setDescription(template.description);
+    setRuleText(template.ruleText);
+    setSourceFileName(undefined);
+    setModal({ open: true, editingRule: null, template });
   };
 
   const openEdit = (rule: ComplianceRule) => {
@@ -45,7 +125,7 @@ export const ComplianceRules: React.FC<ComplianceRulesProps> = ({ rules, onCreat
   };
 
   const closeModal = () => {
-    setModal({ open: false, editingRule: null });
+    setModal({ open: false, editingRule: null, template: null });
   };
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -90,6 +170,62 @@ export const ComplianceRules: React.FC<ComplianceRulesProps> = ({ rules, onCreat
     closeModal();
   };
 
+  const handleAnalyzeCampaigns = async () => {
+    if (selectedRuleIds.size === 0) {
+      setAnalysisError('Please select at least one compliance rule');
+      return;
+    }
+
+    setIsAnalyzing(true);
+    setAnalysisError(null);
+    setAnalysisResults(null);
+
+    try {
+      // Filter to selected rules
+      const selectedRules = rules.filter(r => selectedRuleIds.has(r.id));
+      
+      const result = await analyzeCampaignsCompliance(
+        Array.from(selectedRuleIds),
+        campaigns,
+        selectedRules
+      );
+      setAnalysisResults(result);
+      
+      // Analytics are automatically saved to Firestore by analyzeCampaignsCompliance
+    } catch (err: any) {
+      setAnalysisError(err.message || 'Failed to analyze campaigns');
+    } finally {
+      setIsAnalyzing(false);
+    }
+  };
+
+  const handleSaveResults = async () => {
+    if (!analysisResults) return;
+
+    setIsSaving(true);
+    try {
+      // Results are already saved by analyzeCampaignsCompliance
+      // Just redirect to analytics page
+      navigate('/compliance-analytics');
+    } catch (err: any) {
+      setAnalysisError(err.message || 'Failed to save results');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const toggleRuleSelection = (ruleId: string) => {
+    setSelectedRuleIds(prev => {
+      const next = new Set(prev);
+      if (next.has(ruleId)) {
+        next.delete(ruleId);
+      } else {
+        next.add(ruleId);
+      }
+      return next;
+    });
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
@@ -97,14 +233,51 @@ export const ComplianceRules: React.FC<ComplianceRulesProps> = ({ rules, onCreat
           <h1 className="text-2xl font-bold text-slate-900">Compliance Rules</h1>
           <p className="text-slate-500">Define compliance rules the AI must follow during content generation.</p>
         </div>
-        <button
-          onClick={openCreate}
-          className="flex items-center justify-center space-x-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg transition-colors font-medium"
-        >
-          <Plus size={18} />
-          <span>New Rule</span>
-        </button>
+        <div className="flex items-center space-x-3">
+          {rules.length > 0 && (
+            <ComplianceChecker
+              rules={rules}
+              campaigns={campaigns}
+              contentItems={contentItems}
+            />
+          )}
+          <button
+            onClick={openCreate}
+            className="flex items-center justify-center space-x-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg transition-colors font-medium"
+          >
+            <Plus size={18} />
+            <span>New Rule</span>
+          </button>
+        </div>
       </div>
+
+      {/* Campaign Analysis Section */}
+      {rules.length > 0 && campaigns.length > 0 && (
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center space-x-3">
+              <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center">
+                <BarChart3 className="text-blue-600" size={20} />
+              </div>
+              <div>
+                <h2 className="text-lg font-bold text-slate-900">Campaign Compliance Analysis</h2>
+                <p className="text-sm text-slate-500">Analyze all campaigns against selected compliance rules</p>
+              </div>
+            </div>
+          </div>
+          <div className="flex items-center space-x-2 mb-4">
+            <Link
+              to="/compliance-analytics"
+              className="flex items-center space-x-2 px-4 py-2 text-sm font-medium text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors"
+            >
+              <BarChart3 size={16} />
+              <span>View Analytics Dashboard</span>
+              <ExternalLink size={14} />
+            </Link>
+          </div>
+
+        </div>
+      )}
 
       {rules.length === 0 ? (
         <div className="text-center py-16 bg-white rounded-2xl border border-slate-200">
@@ -174,15 +347,63 @@ export const ComplianceRules: React.FC<ComplianceRulesProps> = ({ rules, onCreat
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl mx-4 max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between p-6 border-b border-slate-200">
-              <h2 className="text-xl font-bold text-slate-900">
-                {modal.editingRule ? 'Edit Compliance Rule' : 'New Compliance Rule'}
-              </h2>
+              <div>
+                <h2 className="text-xl font-bold text-slate-900">
+                  {modal.editingRule ? 'Edit Compliance Rule' : modal.template ? `Create Rule from Template` : 'New Compliance Rule'}
+                </h2>
+                {modal.template && (
+                  <p className="text-sm text-slate-500 mt-1">
+                    Based on: <span className="font-medium">{modal.template.name}</span> ({modal.template.source})
+                  </p>
+                )}
+              </div>
               <button onClick={closeModal} className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg">
                 <X size={20} />
               </button>
             </div>
 
             <div className="p-6 space-y-4">
+              {/* Template Selection - Only show when creating new rule */}
+              {!modal.editingRule && (
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-2">
+                    Start from Template (Optional)
+                  </label>
+                  <select
+                    value={modal.template?.id || ''}
+                    onChange={(e) => {
+                      const templateId = e.target.value;
+                      if (templateId) {
+                        const template = COMPLIANCE_TEMPLATES.find(t => t.id === templateId);
+                        if (template) {
+                          openCreateFromTemplate(template);
+                        }
+                      } else {
+                        // Clear template selection
+                        setName('');
+                        setDescription('');
+                        setRuleText('');
+                        setSourceFileName(undefined);
+                        setModal({ ...modal, template: null });
+                      }
+                    }}
+                    className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
+                  >
+                    <option value="">Create from scratch</option>
+                    {COMPLIANCE_TEMPLATES.map(template => (
+                      <option key={template.id} value={template.id}>
+                        {template.name} ({template.source}) - {template.category}
+                      </option>
+                    ))}
+                  </select>
+                  {modal.template && (
+                    <p className="text-xs text-slate-500 mt-1">
+                      Using template: <span className="font-medium">{modal.template.name}</span> from {modal.template.source}
+                    </p>
+                  )}
+                </div>
+              )}
+
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">Name *</label>
                 <input
