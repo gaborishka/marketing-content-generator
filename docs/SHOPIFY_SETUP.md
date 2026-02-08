@@ -115,9 +115,10 @@ Add rules for the new `shopifyConnections` and `shopifyOAuthStates` collections.
 
 ```
 match /shopifyConnections/{userId} {
-  allow read: if request.auth != null && request.auth.uid == userId;
-  // Write is handled by Cloud Functions (admin SDK), no client write needed
-  allow write: if false;
+  // Block ALL client access — contains plaintext access tokens.
+  // Connection status is read via the shopifyGetConnection Cloud Function,
+  // which returns metadata without exposing the token.
+  allow read, write: if false;
 }
 
 match /shopifyOAuthStates/{stateId} {
@@ -125,6 +126,8 @@ match /shopifyOAuthStates/{stateId} {
   allow read, write: if false;
 }
 ```
+
+**Important:** Do NOT allow client reads on `shopifyConnections` — the documents contain Shopify access tokens. All client access goes through the `shopifyGetConnection` Cloud Function which strips sensitive fields.
 
 Deploy the rules:
 ```bash

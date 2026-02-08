@@ -17,7 +17,10 @@ const db = () => getFirestore();
 
 // ── Shopify OAuth Helpers ────────────────────────────────────────────────────
 
-const SHOPIFY_API_VERSION = "2024-10";
+const SHOPIFY_API_VERSION = "2025-01";
+
+// Maximum number of products to fetch from Shopify (safety limit for large stores)
+const MAX_SHOPIFY_PRODUCTS = 10_000;
 
 /**
  * Build the Shopify OAuth authorization URL.
@@ -36,7 +39,7 @@ export function buildAuthUrl(
     `?client_id=${SHOPIFY_API_KEY.value()}` +
     `&scope=${scopeStr}` +
     `&redirect_uri=${encodeURIComponent(redirectUri)}` +
-    `&state=${state}`
+    `&state=${encodeURIComponent(state)}`
   );
 }
 
@@ -102,15 +105,53 @@ export async function getConnection(
   return doc.data() as ShopifyConnectionDoc;
 }
 
+/**
+ * Revoke the Shopify access token and delete the connection from Firestore.
+ * Best-effort token revocation — the connection is deleted even if revocation fails.
+ */
 export async function deleteConnection(userId: string): Promise<void> {
+  const connection = await getConnection(userId);
+  if (connection) {
+    // Best-effort token revocation on Shopify's side (H5)
+    try {
+      await revokeAccessToken(connection.shop, connection.accessToken);
+    } catch (e) {
+      console.warn(
+        `Failed to revoke Shopify token for user ${userId}:`,
+        e
+      );
+    }
+  }
   await db().collection("shopifyConnections").doc(userId).delete();
+}
+
+/**
+ * Revoke a Shopify access token by calling the Shopify Admin API.
+ */
+async function revokeAccessToken(
+  shop: string,
+  accessToken: string
+): Promise<void> {
+  const cleanShop = sanitizeShop(shop);
+  const url = `https://${cleanShop}/admin/api/${SHOPIFY_API_VERSION}/api_permissions/current.json`;
+  const res = await fetch(url, {
+    method: "DELETE",
+    headers: {
+      "X-Shopify-Access-Token": accessToken,
+    },
+  });
+  if (!res.ok && res.status !== 404) {
+    const body = await res.text();
+    throw new Error(`Shopify token revocation failed (${res.status}): ${body}`);
+  }
 }
 
 // ── Product Sync ─────────────────────────────────────────────────────────────
 
 /**
  * Fetch all products from a Shopify store using the Admin REST API.
- * Handles pagination automatically (limit 250 per page).
+ * Handles pagination, rate limiting (respects Shopify's 2 req/s bucket),
+ * and enforces a safety limit of MAX_SHOPIFY_PRODUCTS.
  */
 export async function fetchShopifyProducts(
   shop: string,
@@ -134,12 +175,29 @@ export async function fetchShopifyProducts(
         `?limit=${limit}&fields=id,title,body_html,vendor,product_type,tags,image,images,variants`;
     }
 
-    const res = await fetch(url, {
+    let res = await fetch(url, {
       headers: {
         "X-Shopify-Access-Token": accessToken,
         "Content-Type": "application/json",
       },
     });
+
+    // Handle rate limiting with exponential backoff (H6)
+    let retries = 0;
+    while (res.status === 429 && retries < 3) {
+      const retryAfter = res.headers.get("retry-after");
+      const waitMs = retryAfter
+        ? parseInt(retryAfter, 10) * 1000
+        : 1000 * Math.pow(2, retries);
+      await new Promise((r) => setTimeout(r, waitMs));
+      res = await fetch(url, {
+        headers: {
+          "X-Shopify-Access-Token": accessToken,
+          "Content-Type": "application/json",
+        },
+      });
+      retries++;
+    }
 
     if (!res.ok) {
       const body = await res.text();
@@ -151,6 +209,14 @@ export async function fetchShopifyProducts(
     const data = (await res.json()) as { products: ShopifyProduct[] };
     allProducts.push(...data.products);
 
+    // Safety limit to prevent runaway fetches on very large stores (L2)
+    if (allProducts.length >= MAX_SHOPIFY_PRODUCTS) {
+      console.warn(
+        `Shopify product fetch capped at ${MAX_SHOPIFY_PRODUCTS} products for shop ${cleanShop}`
+      );
+      break;
+    }
+
     // Check for next page via Link header
     const linkHeader = res.headers.get("link");
     const nextMatch = linkHeader?.match(
@@ -161,6 +227,9 @@ export async function fetchShopifyProducts(
     } else {
       break;
     }
+
+    // Respect rate limits: brief pause between pages
+    await new Promise((r) => setTimeout(r, 500));
   }
 
   return allProducts;
@@ -180,9 +249,18 @@ export function mapShopifyProductToDoc(
     shopifyProduct.images?.[0]?.src ||
     "";
 
-  // Strip HTML tags from description
+  // Strip HTML tags and decode HTML entities from description (M6)
   const description = (shopifyProduct.body_html || "")
     .replace(/<[^>]*>/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&trade;/g, "\u2122")
+    .replace(/&reg;/g, "\u00AE")
+    .replace(/&copy;/g, "\u00A9")
+    .replace(/&#(\d+);/g, (_, code) => String.fromCharCode(Number(code)))
     .replace(/\s+/g, " ")
     .trim();
 
@@ -202,7 +280,7 @@ export function mapShopifyProductToDoc(
     brand: shopifyProduct.vendor || "",
     category: shopifyProduct.product_type || "Uncategorized",
     description: description.slice(0, 500),
-    price: firstVariant ? parseFloat(firstVariant.price) : 0,
+    price: firstVariant ? (Number.isFinite(parseFloat(firstVariant.price)) ? parseFloat(firstVariant.price) : 0) : 0,
     features: [],
     imageUrl,
     complianceFiles: [],
@@ -288,15 +366,19 @@ export async function syncProductsToFirestore(
     await batch.commit();
   }
 
-  // Remove products that no longer exist in Shopify
+  // Remove products that no longer exist in Shopify (chunked to respect 500 limit — H4)
   let removed = 0;
   if (existingMap.size > 0) {
-    const removeBatch = db().batch();
-    for (const [, doc] of existingMap) {
-      removeBatch.delete(doc.ref);
-      removed++;
+    const toRemove = Array.from(existingMap.values());
+    for (let i = 0; i < toRemove.length; i += BATCH_SIZE) {
+      const removeBatch = db().batch();
+      const chunk = toRemove.slice(i, i + BATCH_SIZE);
+      for (const doc of chunk) {
+        removeBatch.delete(doc.ref);
+        removed++;
+      }
+      await removeBatch.commit();
     }
-    await removeBatch.commit();
   }
 
   // Update connection doc with sync metadata
@@ -338,13 +420,16 @@ export function sanitizeShop(shop: string): string {
 
 /**
  * Verify an HMAC signature from Shopify (for OAuth callback validation).
+ * Throws if hmac is missing. Uses constant-time comparison to prevent timing attacks.
  */
 export async function verifyHmac(
   queryParams: Record<string, string>,
   secret: string
 ): Promise<boolean> {
   const { hmac, ...rest } = queryParams;
-  if (!hmac) return false;
+  if (!hmac) {
+    throw new Error("Missing hmac parameter from Shopify callback.");
+  }
 
   // Sort params alphabetically and build the message
   const message = Object.keys(rest)
@@ -352,24 +437,17 @@ export async function verifyHmac(
     .map((key) => `${key}=${rest[key]}`)
     .join("&");
 
-  // Use Web Crypto API (available in Node 20+)
-  const encoder = new TextEncoder();
-  const key = await crypto.subtle.importKey(
-    "raw",
-    encoder.encode(secret),
-    { name: "HMAC", hash: "SHA-256" },
-    false,
-    ["sign"]
-  );
-  const signature = await crypto.subtle.sign(
-    "HMAC",
-    key,
-    encoder.encode(message)
-  );
+  // Compute HMAC-SHA256 using Node crypto
+  const { createHmac, timingSafeEqual } = await import("crypto");
+  const computed = createHmac("sha256", secret)
+    .update(message)
+    .digest("hex");
 
-  const computed = Array.from(new Uint8Array(signature))
-    .map((b) => b.toString(16).padStart(2, "0"))
-    .join("");
-
-  return computed === hmac;
+  // Constant-time comparison to prevent timing attacks
+  const computedBuf = Buffer.from(computed, "utf8");
+  const receivedBuf = Buffer.from(hmac, "utf8");
+  if (computedBuf.length !== receivedBuf.length) {
+    return false;
+  }
+  return timingSafeEqual(computedBuf, receivedBuf);
 }

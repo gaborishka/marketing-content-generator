@@ -437,6 +437,7 @@ export const shopifyGetAuthUrl = onCall(
         .set({
           userId: request.auth.uid,
           shop: sanitizeShop(shop),
+          redirectUri,
           createdAt: new Date(),
           // Expire after 10 minutes
           expiresAt: new Date(Date.now() + 10 * 60 * 1000),
@@ -465,19 +466,17 @@ export const shopifyOAuthCallback = onRequest(
     try {
       const { code, shop, state, hmac } = req.query as Record<string, string>;
 
-      if (!code || !shop || !state) {
-        res.status(400).json({ error: "Missing required query parameters." });
+      if (!code || !shop || !state || !hmac) {
+        res.status(400).json({ error: "Missing required query parameters (code, shop, state, hmac)." });
         return;
       }
 
-      // Verify HMAC if present
-      if (hmac) {
-        const params = req.query as Record<string, string>;
-        const valid = await verifyHmac(params, SHOPIFY_SECRET.value());
-        if (!valid) {
-          res.status(403).json({ error: "HMAC verification failed." });
-          return;
-        }
+      // Verify HMAC — mandatory for all Shopify OAuth callbacks
+      const params = req.query as Record<string, string>;
+      const valid = await verifyHmac(params, SHOPIFY_SECRET.value());
+      if (!valid) {
+        res.status(403).json({ error: "HMAC verification failed." });
+        return;
       }
 
       // Verify state exists and hasn't expired
@@ -501,6 +500,14 @@ export const shopifyOAuthCallback = onRequest(
 
       const userId = stateData.userId as string;
 
+      // Verify shop matches what was stored during auth initiation (M1)
+      const expectedShop = stateData.shop as string;
+      if (sanitizeShop(shop) !== expectedShop) {
+        await stateDoc.ref.delete();
+        res.status(403).json({ error: "Shop domain does not match the original authorization request." });
+        return;
+      }
+
       // Exchange code for token
       const { accessToken, scope } = await exchangeCodeForToken(shop, code);
 
@@ -510,13 +517,18 @@ export const shopifyOAuthCallback = onRequest(
       // Clean up state doc
       await stateDoc.ref.delete();
 
-      // Redirect back to the app's products page
-      const appUrl =
-        stateData.redirectOrigin ||
-        req.headers.referer ||
-        "/";
-      // Redirect to the app with a success indicator
-      const redirectUrl = `${appUrl}#/products?shopify=connected&shop=${encodeURIComponent(sanitizeShop(shop))}`;
+      // Redirect back to the app — use the redirectUri stored during auth initiation (C5)
+      const appOrigin = stateData.redirectUri || "";
+      // Extract origin from the stored redirect URI for safe redirect
+      let safeRedirectBase: string;
+      try {
+        const parsed = new URL(appOrigin);
+        safeRedirectBase = parsed.origin;
+      } catch {
+        // Fallback: redirect to the Cloud Function's own origin (will 404 but is safe)
+        safeRedirectBase = `https://${req.hostname}`;
+      }
+      const redirectUrl = `${safeRedirectBase}/#/products?shopify=connected&shop=${encodeURIComponent(sanitizeShop(shop))}`;
       res.redirect(303, redirectUrl);
     } catch (error: any) {
       console.error("shopifyOAuthCallback error:", error);
@@ -582,6 +594,16 @@ export const shopifyExchangeToken = onCall(
       );
     }
 
+    // Verify shop matches what was stored during auth initiation (C3/M2)
+    const expectedShop = stateData.shop as string;
+    if (sanitizeShop(shop) !== expectedShop) {
+      await stateDoc.ref.delete();
+      throw new HttpsError(
+        "permission-denied",
+        "Shop domain does not match the original authorization request."
+      );
+    }
+
     try {
       const { accessToken, scope } = await exchangeCodeForToken(shop, code);
       await saveConnection(request.auth.uid, shop, accessToken, scope);
@@ -626,7 +648,6 @@ export const shopifySyncProducts = onCall(
   {
     timeoutSeconds: 120,
     memory: "512MiB",
-    secrets: [SHOPIFY_KEY],
     cors: true,
   },
   async (request) => {

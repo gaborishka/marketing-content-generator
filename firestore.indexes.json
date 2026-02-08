@@ -15,6 +15,14 @@
         { "fieldPath": "campaignId", "order": "ASCENDING" },
         { "fieldPath": "userId", "order": "ASCENDING" }
       ]
+    },
+    {
+      "collectionGroup": "products",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "userId", "order": "ASCENDING" },
+        { "fieldPath": "source", "order": "ASCENDING" }
+      ]
     }
   ],
   "fieldOverrides": []

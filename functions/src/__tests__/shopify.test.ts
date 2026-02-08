@@ -54,6 +54,7 @@ vi.mock("firebase-admin/firestore", () => ({
 import {
   sanitizeShop,
   mapShopifyProductToDoc,
+  verifyHmac,
 } from "../utils/shopify";
 import type { ShopifyProduct } from "../types/pipeline";
 
@@ -267,5 +268,109 @@ describe("mapShopifyProductToDoc", () => {
     };
     const doc = mapShopifyProductToDoc(productNoType, "user-1");
     expect(doc.category).toBe("Uncategorized");
+  });
+
+  it("decodes HTML entities in description (M6)", () => {
+    const productWithEntities: ShopifyProduct = {
+      ...sampleShopifyProduct,
+      body_html: "<p>Tom &amp; Jerry&#39;s &quot;Great&quot; Widget&trade;</p>",
+    };
+    const doc = mapShopifyProductToDoc(productWithEntities, "user-1");
+    expect(doc.description).toBe('Tom & Jerry\'s "Great" Widget\u2122');
+  });
+
+  it("returns 0 for NaN price instead of NaN (M5)", () => {
+    const productBadPrice: ShopifyProduct = {
+      ...sampleShopifyProduct,
+      variants: [
+        {
+          id: 789,
+          product_id: 123456,
+          title: "Default",
+          sku: "TW-001",
+          price: "not-a-number",
+        },
+      ],
+    };
+    const doc = mapShopifyProductToDoc(productBadPrice, "user-1");
+    expect(doc.price).toBe(0);
+    expect(Number.isNaN(doc.price)).toBe(false);
+  });
+
+  it("returns 0 for empty string price", () => {
+    const productEmptyPrice: ShopifyProduct = {
+      ...sampleShopifyProduct,
+      variants: [
+        {
+          id: 789,
+          product_id: 123456,
+          title: "Default",
+          sku: "TW-001",
+          price: "",
+        },
+      ],
+    };
+    const doc = mapShopifyProductToDoc(productEmptyPrice, "user-1");
+    expect(doc.price).toBe(0);
+  });
+});
+
+// ── verifyHmac Tests ──────────────────────────────────────────────────────
+
+describe("verifyHmac", () => {
+  const secret = "test-secret-key";
+
+  // Helper to compute the expected HMAC for test params
+  async function computeHmac(
+    params: Record<string, string>,
+    secretKey: string
+  ): Promise<string> {
+    const { createHmac } = await import("crypto");
+    const message = Object.keys(params)
+      .sort()
+      .map((key) => `${key}=${params[key]}`)
+      .join("&");
+    return createHmac("sha256", secretKey).update(message).digest("hex");
+  }
+
+  it("returns true for valid HMAC", async () => {
+    const params = { code: "abc123", shop: "test.myshopify.com", state: "nonce" };
+    const hmac = await computeHmac(params, secret);
+    const result = await verifyHmac({ ...params, hmac }, secret);
+    expect(result).toBe(true);
+  });
+
+  it("returns false for invalid HMAC", async () => {
+    const params = {
+      code: "abc123",
+      shop: "test.myshopify.com",
+      state: "nonce",
+      hmac: "deadbeef0000000000000000000000000000000000000000000000000000dead",
+    };
+    const result = await verifyHmac(params, secret);
+    expect(result).toBe(false);
+  });
+
+  it("throws when hmac parameter is missing", async () => {
+    const params = { code: "abc123", shop: "test.myshopify.com" };
+    await expect(verifyHmac(params, secret)).rejects.toThrow(
+      "Missing hmac parameter"
+    );
+  });
+
+  it("excludes hmac from the signed message", async () => {
+    const params = { code: "abc123", shop: "test.myshopify.com" };
+    const hmac = await computeHmac(params, secret);
+    // The hmac itself should not be part of the signed payload
+    const result = await verifyHmac({ ...params, hmac }, secret);
+    expect(result).toBe(true);
+  });
+
+  it("sorts parameters alphabetically for signing", async () => {
+    // Even if params are in different order, should produce same HMAC
+    const params = { z_param: "last", a_param: "first", m_param: "middle" };
+    const hmac = await computeHmac(params, secret);
+    const result = await verifyHmac({ ...params, hmac }, secret);
+    expect(result).toBe(true);
   });
 });

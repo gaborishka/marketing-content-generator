@@ -214,7 +214,7 @@ export const ProductCatalog: React.FC<ProductCatalogProps> = ({ products, onCrea
   const handleSave = () => {
     if (!isFormValid) return;
 
-    const productData = {
+    const productData: Omit<Product, 'id'> = {
       name: form.name.trim(),
       sku: form.sku.trim(),
       brand: form.brand.trim(),
@@ -225,6 +225,10 @@ export const ProductCatalog: React.FC<ProductCatalogProps> = ({ products, onCrea
       imageUrl: form.imageUrl.trim(),
       complianceFiles: modal.editingProduct?.complianceFiles || [],
       marketingTags: parseCommaSeparated(form.marketingTags),
+      // Preserve Shopify source metadata so syncs don't create duplicates (H1)
+      ...(modal.editingProduct?.source && { source: modal.editingProduct.source }),
+      ...(modal.editingProduct?.shopifyProductId && { shopifyProductId: modal.editingProduct.shopifyProductId }),
+      ...(modal.editingProduct?.shopifyVariantId && { shopifyVariantId: modal.editingProduct.shopifyVariantId }),
     };
 
     if (modal.editingProduct) {
@@ -539,6 +543,15 @@ export const ProductCatalog: React.FC<ProductCatalogProps> = ({ products, onCrea
             </div>
 
             <div className="p-6 space-y-4">
+              {modal.editingProduct?.source === 'shopify' && (
+                <div className="flex items-start space-x-2 text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                  <AlertCircle size={16} className="mt-0.5 flex-shrink-0" />
+                  <span>
+                    This product is synced from Shopify. Fields like name, price, and image will be overwritten on the next sync.
+                    Custom fields (features, marketing tags) you add here will be preserved.
+                  </span>
+                </div>
+              )}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1">Product Name *</label>
