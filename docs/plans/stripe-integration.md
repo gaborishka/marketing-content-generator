@@ -69,7 +69,7 @@ MarketGen AI needs tiered user management with usage limits. Currently: Firebase
 
 ### Phase 4: Firestore Security Rules
 
-- [ ] **4.1 Update `firestore.rules`**
+- [x] **4.1 Update `firestore.rules`**
   - `users/{userId}` — read-only for owner (writes only via Cloud Functions)
   - `users/{userId}/usage/{date}` — read-only for owner
   - `stripeEvents/{eventId}` — no client access
