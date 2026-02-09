@@ -97,7 +97,9 @@ export const LandingPageGenerator: React.FC<LandingPageGeneratorProps> = ({ land
       }
     } catch (error) {
       console.error('Interview fetch error:', error);
-      setPhase('initial');
+      const errorMsg: ChatMessage = { id: `msg-${Date.now()}-err`, role: 'assistant', content: 'Sorry, something went wrong starting the interview. Please try again.', timestamp: Date.now() };
+      setMessages([errorMsg]);
+      setPhase('chat');
     } finally {
       setIsLoading(false);
     }

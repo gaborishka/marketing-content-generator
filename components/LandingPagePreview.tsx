@@ -94,7 +94,7 @@ export const LandingPagePreview: React.FC<LandingPagePreviewProps> = ({ html, is
             <iframe
               ref={iframeRef}
               srcDoc={html}
-              sandbox="allow-scripts allow-same-origin"
+              sandbox="allow-scripts"
               className="w-full h-full border-0"
               title="Landing page preview"
             />

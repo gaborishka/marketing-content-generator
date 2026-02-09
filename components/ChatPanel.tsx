@@ -253,6 +253,9 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ messages, onSendMessage, i
                     </div>
                   )}
                   {msg.role === 'assistant' ? (
+                    // TRUST BOUNDARY: Assistant messages originate from our own Cloud Function.
+                    // renderMarkdown escapes HTML before applying formatting. If this feature
+                    // matures, consider replacing with a battle-tested library (marked + DOMPurify).
                     <div className="markdown-content [&>p]:leading-relaxed [&>ol]:leading-relaxed [&>ul]:leading-relaxed" dangerouslySetInnerHTML={{ __html: renderMarkdown(msg.content) }} />
                   ) : (
                     <span className="whitespace-pre-wrap">{msg.content}</span>

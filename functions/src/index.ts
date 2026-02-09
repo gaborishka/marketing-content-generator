@@ -8,6 +8,7 @@ import { join } from "path";
 import { readFile, unlink } from "fs/promises";
 import { tmpdir } from "os";
 import { GEMINI_API_KEY } from "./utils/gemini";
+import { buildLandingPageSystemPrompt, parseLandingPageResponse, mapMessageToGeminiContent } from "./prompts/landingPage.prompt";
 
 initializeApp();
 
@@ -299,27 +300,7 @@ export const generateLandingPage = onCall(
 
     const ai = getAiClient();
 
-    const contents = conversationHistory.map((msg) => {
-      const parts: any[] = [];
-      if (msg.content) {
-        parts.push({ text: msg.content });
-      }
-      if (msg.images && msg.images.length > 0) {
-        for (const dataUrl of msg.images) {
-          const match = dataUrl.match(/^data:(image\/[^;]+);base64,(.+)$/);
-          if (match) {
-            parts.push({ inlineData: { mimeType: match[1], data: match[2] } });
-          }
-        }
-      }
-      if (parts.length === 0) {
-        parts.push({ text: "" });
-      }
-      return {
-        role: msg.role === "assistant" ? "model" : "user",
-        parts,
-      };
-    });
+    const contents = conversationHistory.map(mapMessageToGeminiContent);
 
     try {
       const response = await ai.models.generateContent({
@@ -332,30 +313,7 @@ export const generateLandingPage = onCall(
       });
 
       const text = response.text || "";
-
-      // Try to extract structured interview questions from ```json code fence
-      const jsonMatch = text.match(/```json\s*\n([\s\S]*?)```/);
-      if (jsonMatch) {
-        try {
-          const parsed = JSON.parse(jsonMatch[1]);
-          if (Array.isArray(parsed.questions) && parsed.questions.length > 0) {
-            return { message: "", html: null, interview: parsed.questions };
-          }
-        } catch {
-          // JSON parse failed — fall through to normal handling
-        }
-      }
-
-      // Extract HTML from ```html ... ``` code fence
-      const htmlMatch = text.match(/```html\s*\n([\s\S]*?)```/);
-      const html = htmlMatch ? htmlMatch[1].trim() : null;
-
-      // Strip code fence from message to get just the conversational text
-      const message = html
-        ? text.replace(/```html\s*\n[\s\S]*?```/, "").trim() || "Here's your landing page!"
-        : text;
-
-      return { message, html, interview: null };
+      return parseLandingPageResponse(text);
     } catch (error: any) {
       console.error("generateLandingPage error:", error);
       throw new HttpsError("internal", error.message || "Landing page generation failed.");
@@ -367,7 +325,6 @@ export const generateLandingPage = onCall(
 // Quick onCall trigger: validates input, creates a job doc, returns { jobId }.
 // The actual pipeline runs asynchronously via processGenerationJob below.
 
-import { buildLandingPageSystemPrompt } from "./prompts/landingPage.prompt";
 import { createJobIfNoActive, updateJobDoc } from "./utils/firestore";
 import { runOrchestrator } from "./agents/orchestrator";
 

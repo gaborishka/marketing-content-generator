@@ -1,3 +1,67 @@
+/**
+ * Parse the raw Gemini response text and extract either interview questions
+ * (JSON code fence) or generated HTML (html code fence) plus a message.
+ */
+export function parseLandingPageResponse(text: string): {
+  message: string;
+  html: string | null;
+  interview: { label: string; question: string; options: string[] }[] | null;
+} {
+  // Try to extract structured interview questions from ```json code fence
+  const jsonMatch = text.match(/```json\s*\n([\s\S]*?)```/);
+  if (jsonMatch) {
+    try {
+      const parsed = JSON.parse(jsonMatch[1]);
+      if (Array.isArray(parsed.questions) && parsed.questions.length > 0) {
+        return { message: "", html: null, interview: parsed.questions };
+      }
+    } catch {
+      // JSON parse failed — fall through to normal handling
+    }
+  }
+
+  // Extract HTML from ```html ... ``` code fence
+  const htmlMatch = text.match(/```html\s*\n([\s\S]*?)```/);
+  const html = htmlMatch ? htmlMatch[1].trim() : null;
+
+  // Strip code fence from message to get just the conversational text
+  const message = html
+    ? text.replace(/```html\s*\n[\s\S]*?```/, "").trim() || "Here's your landing page!"
+    : text;
+
+  return { message, html, interview: null };
+}
+
+/**
+ * Map a conversation history entry to Gemini-compatible content format.
+ * Handles text, image data URLs, and role mapping (assistant → model).
+ */
+export function mapMessageToGeminiContent(msg: {
+  role: string;
+  content: string;
+  images?: string[];
+}): { role: string; parts: ({ text: string } | { inlineData: { mimeType: string; data: string } })[] } {
+  const parts: ({ text: string } | { inlineData: { mimeType: string; data: string } })[] = [];
+  if (msg.content) {
+    parts.push({ text: msg.content });
+  }
+  if (msg.images && msg.images.length > 0) {
+    for (const dataUrl of msg.images) {
+      const match = dataUrl.match(/^data:(image\/[^;]+);base64,(.+)$/);
+      if (match) {
+        parts.push({ inlineData: { mimeType: match[1], data: match[2] } });
+      }
+    }
+  }
+  if (parts.length === 0) {
+    parts.push({ text: "" });
+  }
+  return {
+    role: msg.role === "assistant" ? "model" : "user",
+    parts,
+  };
+}
+
 export function buildLandingPageSystemPrompt(currentHtml?: string): string {
   let refinementBlock = "";
   if (currentHtml) {
