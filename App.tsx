@@ -195,17 +195,27 @@ function App() {
           storage.getAll<Brand>('brands')
         ]);
 
+        // Scope seed IDs to current user to avoid cross-user document collisions
+        const prefix = currentUser!.uid.substring(0, 8);
+        const scopeId = (id: string) => `${prefix}_${id}`;
+
         if (dbProducts.length === 0) {
-          // Seed DB with mock data if empty
-          await Promise.all(MOCK_PRODUCTS.map(p => storage.put('products', p)));
-          setProducts(MOCK_PRODUCTS);
+          const seeded = MOCK_PRODUCTS.map(p => ({ ...p, id: scopeId(p.id) }));
+          await Promise.all(seeded.map(p => storage.put('products', p)));
+          setProducts(seeded);
         } else {
           setProducts(dbProducts);
         }
 
         if (dbCampaigns.length === 0) {
-          await Promise.all(MOCK_CAMPAIGNS.map(c => storage.put('campaigns', c)));
-          setCampaigns(MOCK_CAMPAIGNS);
+          const seeded = MOCK_CAMPAIGNS.map(c => ({
+            ...c,
+            id: scopeId(c.id),
+            primaryProductId: c.primaryProductId ? scopeId(c.primaryProductId) : undefined,
+            secondaryProductIds: c.secondaryProductIds?.map(scopeId) || [],
+          }));
+          await Promise.all(seeded.map(c => storage.put('campaigns', c)));
+          setCampaigns(seeded);
         } else {
           setCampaigns(dbCampaigns);
         }
@@ -214,8 +224,14 @@ function App() {
         setBrands(dbBrands);
 
         if (dbContent.length === 0) {
-          await Promise.all(INITIAL_CONTENT.map(c => storage.put('content', c)));
-          setContentStore(INITIAL_CONTENT);
+          const seeded = INITIAL_CONTENT.map(c => ({
+            ...c,
+            id: scopeId(c.id),
+            campaignId: scopeId(c.campaignId),
+            connections: c.connections?.map(scopeId),
+          }));
+          await Promise.all(seeded.map(c => storage.put('content', c)));
+          setContentStore(seeded);
         } else {
           setContentStore(dbContent.filter(c => c.status !== 'generating'));
         }
