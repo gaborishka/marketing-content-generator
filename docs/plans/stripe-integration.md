@@ -50,16 +50,16 @@ MarketGen AI needs tiered user management with usage limits. Currently: Firebase
 
 ### Phase 3: Stripe Cloud Functions
 
-- [ ] **3.1 Add `createCheckoutSession` Cloud Function** (onCall)
+- [x] **3.1 Add `createCheckoutSession` Cloud Function** (onCall)
   - Creates/reuses Stripe customer (stores `stripeCustomerId` in user profile)
   - Creates Stripe Checkout session for Pro subscription ($29/mo or $290/yr)
   - Returns `{ sessionId, url }` — frontend redirects to Stripe
 
-- [ ] **3.2 Add `createPortalSession` Cloud Function** (onCall)
+- [x] **3.2 Add `createPortalSession` Cloud Function** (onCall)
   - Creates Stripe Customer Portal session for managing subscription
   - Returns `{ url }` — frontend redirects
 
-- [ ] **3.3 Add `stripeWebhook` Cloud Function** (onRequest — NOT onCall)
+- [x] **3.3 Add `stripeWebhook` Cloud Function** (onRequest — NOT onCall)
   - Verifies Stripe webhook signature via `req.rawBody`
   - Idempotency via `stripeEvents/{eventId}` collection
   - Handles events:

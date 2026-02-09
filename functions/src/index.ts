@@ -4,6 +4,7 @@ import { GoogleGenAI, Type, VideoGenerationReferenceType } from "@google/genai";
 import { initializeApp } from "firebase-admin/app";
 import { getStorage } from "firebase-admin/storage";
 import { getFirestore, FieldValue } from "firebase-admin/firestore";
+import Stripe from "stripe";
 import { randomUUID } from "crypto";
 import { join } from "path";
 import { readFile, unlink } from "fs/promises";
@@ -14,8 +15,13 @@ import {
   checkQuota,
   incrementUsage,
   getDailyUsage,
+  getUserProfile,
+  updateUserProfile,
+  findUidByCustomerId,
+  STRIPE_SECRET_KEY,
+  STRIPE_WEBHOOK_SECRET,
 } from "./utils/billing";
-import { TIER_LIMITS } from "./types/pipeline";
+import { TIER_LIMITS, UserTier } from "./types/pipeline";
 import { buildLandingPageSystemPrompt, parseLandingPageResponse, mapMessageToGeminiContent } from "./prompts/landingPage.prompt";
 import {
   SHOPIFY_CLIENT_ID,
@@ -526,6 +532,190 @@ export const getUserProfileAndUsage = onCall(
       generationCount: usage?.generationCount ?? 0,
       limit: TIER_LIMITS[profile.tier],
     };
+  }
+);
+
+// ── Stripe Price IDs ──────────────────────────────────────────────────────
+// These should match the price IDs created in Stripe Dashboard.
+const STRIPE_PRICE_MONTHLY = "price_pro_monthly_29";
+const STRIPE_PRICE_YEARLY = "price_pro_yearly_290";
+
+const getStripe = () => new Stripe(STRIPE_SECRET_KEY.value());
+
+// ── createCheckoutSession ─────────────────────────────────────────────────
+
+export const createCheckoutSession = onCall(
+  { timeoutSeconds: 30, memory: "256MiB", secrets: [STRIPE_SECRET_KEY], cors: true },
+  async (request) => {
+    if (!request.auth) {
+      throw new HttpsError("unauthenticated", "Authentication required.");
+    }
+
+    const uid = request.auth.uid;
+    const email = request.auth.token.email || "";
+    const displayName = request.auth.token.name || "";
+
+    const profile = await getOrCreateUserProfile(uid, email, displayName);
+    const stripe = getStripe();
+
+    // Reuse existing Stripe customer or create a new one
+    let customerId = profile.stripeCustomerId;
+    if (!customerId) {
+      const customer = await stripe.customers.create({
+        email,
+        name: displayName,
+        metadata: { firebaseUid: uid },
+      });
+      customerId = customer.id;
+      await updateUserProfile(uid, { stripeCustomerId: customerId });
+    }
+
+    // Determine which price to use (default: monthly)
+    const { interval } = (request.data || {}) as { interval?: "monthly" | "yearly" };
+    const priceId = interval === "yearly" ? STRIPE_PRICE_YEARLY : STRIPE_PRICE_MONTHLY;
+
+    const session = await stripe.checkout.sessions.create({
+      customer: customerId,
+      mode: "subscription",
+      line_items: [{ price: priceId, quantity: 1 }],
+      success_url: "{CHECKOUT_SESSION_URL}?billing=success",
+      cancel_url: "{CHECKOUT_SESSION_URL}?billing=canceled",
+      metadata: { firebaseUid: uid },
+    });
+
+    return { sessionId: session.id, url: session.url };
+  }
+);
+
+// ── createPortalSession ───────────────────────────────────────────────────
+
+export const createPortalSession = onCall(
+  { timeoutSeconds: 30, memory: "256MiB", secrets: [STRIPE_SECRET_KEY], cors: true },
+  async (request) => {
+    if (!request.auth) {
+      throw new HttpsError("unauthenticated", "Authentication required.");
+    }
+
+    const uid = request.auth.uid;
+    const profile = await getUserProfile(uid);
+
+    if (!profile?.stripeCustomerId) {
+      throw new HttpsError("failed-precondition", "No billing account found. Please subscribe first.");
+    }
+
+    const stripe = getStripe();
+    const session = await stripe.billingPortal.sessions.create({
+      customer: profile.stripeCustomerId,
+      return_url: "{CHECKOUT_SESSION_URL}",
+    });
+
+    return { url: session.url };
+  }
+);
+
+// ── stripeWebhook ─────────────────────────────────────────────────────────
+
+export const stripeWebhook = onRequest(
+  { timeoutSeconds: 30, memory: "256MiB", secrets: [STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET], cors: false },
+  async (req, res) => {
+    if (req.method !== "POST") {
+      res.status(405).send("Method Not Allowed");
+      return;
+    }
+
+    const stripe = getStripe();
+    const sig = req.headers["stripe-signature"] as string;
+
+    let event: Stripe.Event;
+    try {
+      event = stripe.webhooks.constructEvent(
+        req.rawBody,
+        sig,
+        STRIPE_WEBHOOK_SECRET.value()
+      );
+    } catch (err: any) {
+      console.error("Webhook signature verification failed:", err.message);
+      res.status(400).send(`Webhook Error: ${err.message}`);
+      return;
+    }
+
+    // Idempotency: skip if this event was already processed
+    const db = getFirestore();
+    const eventRef = db.collection("stripeEvents").doc(event.id);
+    const eventDoc = await eventRef.get();
+    if (eventDoc.exists) {
+      res.status(200).json({ received: true, duplicate: true });
+      return;
+    }
+
+    // Mark as processing (write early for idempotency)
+    await eventRef.set({
+      type: event.type,
+      processedAt: FieldValue.serverTimestamp(),
+    });
+
+    try {
+      switch (event.type) {
+        case "checkout.session.completed": {
+          const session = event.data.object as Stripe.Checkout.Session;
+          const customerId = session.customer as string;
+          const subscriptionId = session.subscription as string;
+
+          const uid = await findUidByCustomerId(customerId);
+          if (uid && subscriptionId) {
+            await updateUserProfile(uid, {
+              tier: "pro" as UserTier,
+              stripeSubscriptionId: subscriptionId,
+              stripeSubscriptionStatus: "active",
+            });
+          }
+          break;
+        }
+
+        case "customer.subscription.updated": {
+          const subscription = event.data.object as Stripe.Subscription;
+          const customerId = subscription.customer as string;
+          const uid = await findUidByCustomerId(customerId);
+
+          if (uid) {
+            const status = subscription.status;
+            const tier: UserTier = status === "active" ? "pro" : "free";
+            await updateUserProfile(uid, {
+              tier,
+              stripeSubscriptionId: subscription.id,
+              stripeSubscriptionStatus: status,
+            });
+          }
+          break;
+        }
+
+        case "customer.subscription.deleted": {
+          const subscription = event.data.object as Stripe.Subscription;
+          const customerId = subscription.customer as string;
+          const uid = await findUidByCustomerId(customerId);
+
+          if (uid) {
+            await updateUserProfile(uid, {
+              tier: "free" as UserTier,
+              stripeSubscriptionId: undefined,
+              stripeSubscriptionStatus: "canceled",
+            });
+          }
+          break;
+        }
+
+        default:
+          // Unhandled event type — acknowledge silently
+          break;
+      }
+    } catch (err: any) {
+      console.error(`Error processing webhook event ${event.id}:`, err);
+      // Don't delete the idempotency record — we still want to prevent re-processing
+      res.status(500).send("Webhook processing error");
+      return;
+    }
+
+    res.status(200).json({ received: true });
   }
 );
 
