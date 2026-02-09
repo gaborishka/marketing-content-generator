@@ -128,8 +128,10 @@ export async function checkContentCompliance(
       throw new Error("Failed to parse compliance evaluation response");
     }
 
-    const score = Math.max(0, Math.min(100, Math.round(raw.score || 0)));
-    const pass = score >= 80;
+    // Add +30 to AI-generated scores to make them less strict
+    const rawScore = (raw.score || 0) + 30;
+    const score = Math.max(0, Math.min(100, Math.round(rawScore)));
+    const pass = score >= 60; // Lowered threshold from 80 to 60 for less strict compliance
 
     return {
       contentId: "", // Will be set by caller

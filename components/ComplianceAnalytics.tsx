@@ -38,8 +38,24 @@ export const ComplianceAnalytics: React.FC<ComplianceAnalyticsProps> = ({ rules,
   };
 
   // Separate individual content checks from campaign-level checks
-  const individualChecks = complianceChecks.filter(check => check.checkType === 'content');
-  const campaignChecks = complianceChecks.filter(check => check.checkType === 'campaign');
+  const individualChecks = complianceChecks.filter(check => {
+    const isContent = check.checkType === 'content';
+    if (!isContent) {
+      console.log('[ComplianceAnalytics] Check not content type:', check.id, 'checkType:', check.checkType);
+    }
+    return isContent;
+  });
+  const campaignChecks = complianceChecks.filter(check => {
+    const isCampaign = check.checkType === 'campaign';
+    if (!isCampaign) {
+      console.log('[ComplianceAnalytics] Check not campaign type:', check.id, 'checkType:', check.checkType);
+    }
+    return isCampaign;
+  });
+  
+  console.log('[ComplianceAnalytics] Total checks:', complianceChecks.length);
+  console.log('[ComplianceAnalytics] Individual checks:', individualChecks.length);
+  console.log('[ComplianceAnalytics] Campaign checks:', campaignChecks.length);
 
   const filteredIndividualChecks = individualChecks.filter(check => {
     if (selectedRuleId !== 'all' && check.ruleId !== selectedRuleId) return false;
@@ -65,13 +81,40 @@ export const ComplianceAnalytics: React.FC<ComplianceAnalyticsProps> = ({ rules,
   const totalItemsChecked = [...filteredIndividualChecks, ...filteredCampaignChecks].reduce((sum, c) => sum + c.total, 0);
   const totalPassed = [...filteredIndividualChecks, ...filteredCampaignChecks].reduce((sum, c) => sum + c.passed, 0);
   const totalFailed = [...filteredIndividualChecks, ...filteredCampaignChecks].reduce((sum, c) => sum + c.failed, 0);
+  
+  // Calculate pass rate from checks (items checked)
   const overallPassRate = totalItemsChecked > 0 
     ? Math.round((totalPassed / totalItemsChecked) * 100) 
     : 0;
 
-  const averageScore = filteredAnalytics.length > 0
-    ? Math.round(filteredAnalytics.reduce((sum, a) => sum + a.averageScore, 0) / filteredAnalytics.length)
-    : 0;
+  // Calculate average score from all sources (checks and analytics)
+  // Get scores from individual checks
+  const checkScores: number[] = [];
+  [...filteredIndividualChecks, ...filteredCampaignChecks].forEach(check => {
+    check.results?.forEach((result: any) => {
+      if (result.score !== undefined) {
+        checkScores.push(result.score);
+      }
+    });
+  });
+  
+  // Get scores from analytics
+  const analyticsScores: number[] = [];
+  filteredAnalytics.forEach(analytics => {
+    analytics.results?.forEach((result: any) => {
+      if (result.score !== undefined) {
+        analyticsScores.push(result.score);
+      }
+    });
+  });
+  
+  // Combine all scores
+  const allScores = [...checkScores, ...analyticsScores];
+  const averageScore = allScores.length > 0
+    ? Math.round(allScores.reduce((sum, score) => sum + score, 0) / allScores.length)
+    : (filteredAnalytics.length > 0
+      ? Math.round(filteredAnalytics.reduce((sum, a) => sum + a.averageScore, 0) / filteredAnalytics.length)
+      : 0);
 
   if (isLoading) {
     return (
@@ -101,18 +144,6 @@ export const ComplianceAnalytics: React.FC<ComplianceAnalyticsProps> = ({ rules,
       {/* Filters */}
       <div className="bg-white rounded-lg p-4 border border-slate-200">
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <div>
-            <label className="block text-sm font-medium text-slate-700 mb-2">View Type</label>
-            <select
-              value={selectedFilter}
-              onChange={(e) => setSelectedFilter(e.target.value as 'all' | 'checks' | 'analytics')}
-              className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-            >
-              <option value="all">All Results</option>
-              <option value="checks">Individual Checks</option>
-              <option value="analytics">Campaign Analytics</option>
-            </select>
-          </div>
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-2">Compliance Rule</label>
             <select
@@ -183,7 +214,7 @@ export const ComplianceAnalytics: React.FC<ComplianceAnalyticsProps> = ({ rules,
       </div>
 
       {/* Campaign-Level Compliance Checks */}
-      {(selectedFilter === 'all' || selectedFilter === 'checks') && filteredCampaignChecks.length > 0 && (
+      {selectedFilter === 'all' && filteredCampaignChecks.length > 0 && (
         <div className="bg-white rounded-lg border border-slate-200">
           <div className="p-4 border-b border-slate-200">
             <h2 className="text-lg font-semibold text-slate-900">Campaign Compliance Checks</h2>
@@ -368,15 +399,31 @@ export const ComplianceAnalytics: React.FC<ComplianceAnalyticsProps> = ({ rules,
       )}
 
       {/* Empty State */}
-      {filteredIndividualChecks.length === 0 && filteredCampaignChecks.length === 0 && filteredAnalytics.length === 0 && (
-        <div className="bg-white rounded-lg border border-slate-200 p-12 text-center">
-          <BarChart3 className="mx-auto text-slate-400 mb-4" size={48} />
-          <h3 className="text-lg font-semibold text-slate-900 mb-2">No Analytics Data</h3>
-          <p className="text-slate-600">
-            Run compliance checks or campaign analysis to see results here.
-          </p>
-        </div>
-      )}
+      {(() => {
+        // Check if we should show empty state based on selected filter
+        let shouldShowEmpty = false;
+        let emptyMessage = "Run compliance checks or campaign analysis to see results here.";
+        
+        if (selectedFilter === 'all') {
+          shouldShowEmpty = filteredIndividualChecks.length === 0 && filteredCampaignChecks.length === 0 && filteredAnalytics.length === 0;
+        } else if (selectedFilter === 'checks') {
+          shouldShowEmpty = filteredIndividualChecks.length === 0;
+          emptyMessage = "No individual content checks found. Run a compliance check on specific content items to see results here.";
+        } else if (selectedFilter === 'analytics') {
+          shouldShowEmpty = filteredAnalytics.length === 0;
+          emptyMessage = "No campaign analytics found. Run campaign analysis to see results here.";
+        }
+        
+        return shouldShowEmpty ? (
+          <div className="bg-white rounded-lg border border-slate-200 p-12 text-center">
+            <BarChart3 className="mx-auto text-slate-400 mb-4" size={48} />
+            <h3 className="text-lg font-semibold text-slate-900 mb-2">No Data Found</h3>
+            <p className="text-slate-600">
+              {emptyMessage}
+            </p>
+          </div>
+        ) : null;
+      })()}
     </div>
   );
 };
