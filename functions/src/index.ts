@@ -539,7 +539,8 @@ const STRIPE_PRICE_YEARLY = "price_pro_yearly_290";
 const getStripe = () => new Stripe(STRIPE_SECRET_KEY.value());
 
 // Validate returnUrl to prevent open redirect attacks.
-// Only allows same-origin URLs or localhost for dev.
+// Requires same-origin match when Origin header is available, otherwise
+// restricts to localhost (dev). Rejects all other URLs without a verified origin.
 function validateReturnUrl(url: string, requestOrigin?: string): string {
   let parsed: URL;
   try {
@@ -565,6 +566,9 @@ function validateReturnUrl(url: string, requestOrigin?: string): string {
       if (e instanceof HttpsError) throw e;
       // If origin header can't be parsed, fall through to localhost check
     }
+  } else if (!isLocalhost) {
+    // No Origin header and not localhost — reject to prevent open redirects
+    throw new HttpsError("invalid-argument", "returnUrl origin could not be verified.");
   }
   return url;
 }
@@ -699,7 +703,9 @@ export const stripeWebhook = onRequest(
         res.status(200).json({ received: true, duplicate: true });
         return;
       }
-      throw err;
+      console.error(`Failed to create idempotency record for ${event.id}:`, err);
+      res.status(500).send("Internal error");
+      return;
     }
 
     // Safely extract a string customer ID from Stripe objects (can be string or expanded object)
@@ -786,16 +792,13 @@ export const stripeWebhook = onRequest(
       }
     } catch (err: any) {
       console.error(`Error processing webhook event ${event.id}:`, err);
-      // Mark the idempotency record as failed instead of deleting it.
-      // This prevents infinite retry loops for permanent failures while
-      // still allowing manual investigation via the stripeEvents collection.
+      // Delete the idempotency record so Stripe can retry this event.
+      // Returning 500 tells Stripe to retry, and deleting the record
+      // ensures the retry won't be treated as a duplicate.
       try {
-        await eventRef.update({
-          error: err.message || "Unknown error",
-          failedAt: FieldValue.serverTimestamp(),
-        });
-      } catch (updateErr) {
-        console.error(`Failed to update idempotency record for ${event.id}:`, updateErr);
+        await eventRef.delete();
+      } catch (deleteErr) {
+        console.error(`Failed to delete idempotency record for ${event.id}:`, deleteErr);
       }
       res.status(500).send("Webhook processing error");
       return;
