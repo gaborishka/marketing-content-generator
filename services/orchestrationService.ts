@@ -167,15 +167,44 @@ export async function checkCompliance(
     // Fetch content items
     let contentItems: GeneratedContent[] = [];
 
-    if (options.contentIds && options.contentIds.length > 0) {
+    // Priority: if contentIds are provided and not empty, use them (single item mode)
+    // Otherwise, if campaignId is provided, fetch all content for that campaign (campaign mode)
+    if (options.contentIds && Array.isArray(options.contentIds) && options.contentIds.length > 0) {
+      console.log('[checkCompliance] Using contentIds mode, fetching', options.contentIds.length, 'items');
       contentItems = await getContentByIds(options.contentIds);
     } else if (options.campaignId) {
+      console.log('[checkCompliance] Using campaignId mode, fetching all content for campaign:', options.campaignId);
       contentItems = await getContentForCampaign(options.campaignId);
     } else {
       throw new Error('Either contentIds or campaignId must be provided');
     }
 
+    console.log('[checkCompliance] Fetched content items:', contentItems.length);
+    console.log('[checkCompliance] Content items:', contentItems.map(item => ({
+      id: item.id,
+      hasText: !!item.text,
+      textLength: item.text?.length || 0,
+      channel: item.channel,
+      audience: item.audience,
+    })));
+
     if (contentItems.length === 0) {
+      console.warn('[checkCompliance] No content items found for campaign/content');
+      return {
+        success: true,
+        total: 0,
+        passed: 0,
+        failed: 0,
+        results: [],
+      };
+    }
+
+    // Filter out items without text (they can't be checked)
+    const itemsWithText = contentItems.filter(item => item.text && item.text.trim().length > 0);
+    console.log('[checkCompliance] Items with text:', itemsWithText.length, 'out of', contentItems.length);
+
+    if (itemsWithText.length === 0) {
+      console.warn('[checkCompliance] No content items with text to check');
       return {
         success: true,
         total: 0,
@@ -186,18 +215,25 @@ export async function checkCompliance(
     }
 
     // Check compliance using Gemini API directly
-    const itemsToCheck = contentItems.map(item => ({
+    const itemsToCheck = itemsWithText.map(item => ({
       id: item.id,
-      text: item.text,
+      text: item.text || '',
       channel: item.channel,
       audience: item.audience,
     }));
 
+    console.log('[checkCompliance] Checking compliance for', itemsToCheck.length, 'items');
     const results = await checkMultipleContentCompliance(
       itemsToCheck,
       ruleText,
       ruleName
     );
+    console.log('[checkCompliance] Compliance check results:', results.map(r => ({
+      contentId: r.contentId,
+      score: r.score,
+      pass: r.pass,
+      violations: r.violations.length,
+    })));
 
     // Update Firestore with results
     await Promise.allSettled(

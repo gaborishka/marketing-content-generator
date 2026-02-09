@@ -1,27 +1,37 @@
 // AI service for content modification via chat
+// Uses Cloud Functions to keep API keys secure
 import { GeneratedContent } from '../types';
-import { GoogleGenAI, Type } from "@google/genai";
+import { httpsCallable } from 'firebase/functions';
+import { functions } from './firebase';
 import { generateImage } from './geminiClient';
 
-// Get API key from environment variable
-const getApiKey = (): string => {
-  const apiKey = import.meta.env.GEMINI_API_KEY;
-  if (!apiKey) {
-    throw new Error("GEMINI_API_KEY environment variable is required. Add it to your .env.local file.");
+// Cloud Function reference for content AI chat
+const chatWithAIForContentFn = httpsCallable<
+  {
+    content: {
+      channel: string;
+      audience: string;
+      text: string;
+      headline?: string;
+      body?: string;
+      imageUrl?: string;
+    };
+    campaignContext?: {
+      name: string;
+      keyMessage: string;
+      audience: string;
+    };
+    messages: Array<{ role: 'user' | 'assistant'; content: string; timestamp?: string }>;
+  },
+  {
+    message: string;
+    shouldUpdate?: boolean;
+    updateFields?: string[];
+    updatedContent?: Partial<GeneratedContent>;
+    imagePrompt?: string;
+    questions?: string[];
   }
-  return apiKey;
-};
-
-// Initialize Gemini client
-let client: GoogleGenAI | null = null;
-
-function getGeminiClient(): GoogleGenAI {
-  if (!client) {
-    const apiKey = getApiKey();
-    client = new GoogleGenAI({ apiKey });
-  }
-  return client;
-}
+>(functions, 'chatWithAIForContent');
 
 interface ChatMessage {
   role: 'user' | 'assistant';
@@ -38,37 +48,72 @@ interface AIResponse {
   questions?: string[];
 }
 
-const CONTENT_MODIFICATION_SCHEMA = {
-  type: Type.OBJECT,
-  properties: {
-    message: { type: Type.STRING, description: "Response message to the user" },
-    shouldUpdate: { type: Type.BOOLEAN, description: "Whether to update the content automatically" },
-    updateFields: {
-      type: Type.ARRAY,
-      items: { type: Type.STRING },
-      description: "List of fields that should be updated: 'headline', 'body', 'text', 'image'"
-    },
-    updatedHeadline: { type: Type.STRING, description: "Updated headline ONLY if updateFields includes 'headline'" },
-    updatedBody: { type: Type.STRING, description: "Updated body text ONLY if updateFields includes 'body'" },
-    updatedText: { type: Type.STRING, description: "Updated full text ONLY if updateFields includes 'text' (use this if both headline and body need to change)" },
-    imagePrompt: { type: Type.STRING, description: "Image generation prompt ONLY if updateFields includes 'image'" },
-    questions: { 
-      type: Type.ARRAY, 
-      items: { type: Type.STRING },
-      description: "Follow-up questions to ask the user if clarification is needed"
-    },
-    reasoning: { type: Type.STRING, description: "Brief explanation of the changes made" }
-  },
-  required: ["message"],
-};
+// Schema is now handled by Cloud Function
 
 export async function chatWithAIForContent(
   content: GeneratedContent,
   messages: ChatMessage[],
   campaignContext?: { name: string; keyMessage: string; audience: string }
 ): Promise<AIResponse> {
-  const ai = getGeminiClient();
-  
+  try {
+    // Convert messages to the format expected by Cloud Function
+    const cloudMessages = messages.map(msg => ({
+      role: msg.role,
+      content: msg.content,
+      timestamp: msg.timestamp.toISOString(),
+    }));
+
+    const result = await chatWithAIForContentFn({
+      content: {
+        channel: content.channel,
+        audience: content.audience,
+        text: content.text,
+        headline: content.headline,
+        body: content.body,
+        imageUrl: content.imageUrl,
+      },
+      campaignContext,
+      messages: cloudMessages,
+    });
+
+    const raw = result.data;
+
+    // Process the response
+    const response: AIResponse = {
+      message: raw.message || "",
+      shouldUpdate: raw.shouldUpdate || false,
+      updateFields: raw.updateFields || [],
+      questions: raw.questions || [],
+      updatedContent: raw.updatedContent || {},
+      imagePrompt: raw.imagePrompt,
+    };
+
+    // Map updatedContent fields properly from Cloud Function response
+    if (response.shouldUpdate && response.updateFields) {
+      response.updatedContent = response.updatedContent || {};
+      
+      // The Cloud Function may return updatedHeadline, updatedBody, updatedText separately
+      // Map them to updatedContent based on updateFields
+      if (response.updateFields.includes('headline') && (raw as any).updatedHeadline) {
+        response.updatedContent.headline = (raw as any).updatedHeadline;
+      }
+      if (response.updateFields.includes('body') && (raw as any).updatedBody) {
+        response.updatedContent.body = (raw as any).updatedBody;
+      }
+      if (response.updateFields.includes('text') && (raw as any).updatedText) {
+        response.updatedContent.text = (raw as any).updatedText;
+      }
+    }
+
+    return response;
+  } catch (error: any) {
+    console.error("AI chat error:", error);
+    throw new Error(`AI chat failed: ${error.message || String(error)}`);
+  }
+}
+
+// OLD IMPLEMENTATION REMOVED - Now using Cloud Functions
+/*
   // Build context prompt
   const contextPrompt = `You are an AI assistant helping to modify marketing content. 
 
@@ -250,4 +295,5 @@ Respond in JSON format with the schema provided.`;
     throw new Error(`AI chat failed: ${error.message || String(error)}`);
   }
 }
+*/
 
