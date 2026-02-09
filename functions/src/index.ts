@@ -4,11 +4,24 @@ import { GoogleGenAI, Type, VideoGenerationReferenceType } from "@google/genai";
 import { initializeApp } from "firebase-admin/app";
 import { getStorage } from "firebase-admin/storage";
 import { getFirestore, FieldValue } from "firebase-admin/firestore";
+import Stripe from "stripe";
 import { randomUUID } from "crypto";
 import { join } from "path";
 import { readFile, unlink } from "fs/promises";
 import { tmpdir } from "os";
 import { GEMINI_API_KEY } from "./utils/gemini";
+import {
+  getOrCreateUserProfile,
+  checkAndIncrementQuota,
+  decrementUsage,
+  getDailyUsage,
+  getUserProfile,
+  updateUserProfile,
+  findUidByCustomerId,
+  STRIPE_SECRET_KEY,
+  STRIPE_WEBHOOK_SECRET,
+} from "./utils/billing";
+import { TIER_LIMITS, UserTier } from "./types/pipeline";
 import { buildLandingPageSystemPrompt, parseLandingPageResponse, mapMessageToGeminiContent } from "./prompts/landingPage.prompt";
 import {
   SHOPIFY_CLIENT_ID,
@@ -67,6 +80,23 @@ interface GenerateVideoInput {
 
 const getAiClient = () => new GoogleGenAI({ apiKey: GEMINI_API_KEY.value() });
 
+// ── Quota enforcement helper ─────────────────────────────────────────────────
+
+// enforceQuotaAndIncrement atomically checks quota AND increments usage in a
+// single Firestore transaction, preventing concurrent requests from exceeding
+// the daily limit.
+async function enforceQuotaAndIncrement(uid: string, email: string, displayName: string): Promise<void> {
+  await getOrCreateUserProfile(uid, email, displayName);
+  const quota = await checkAndIncrementQuota(uid);
+  if (!quota.allowed) {
+    const message =
+      quota.tier === "free"
+        ? `Daily generation limit reached (${quota.current}/${quota.limit}). Upgrade to Pro for ${TIER_LIMITS.pro} generations/day.`
+        : `Daily generation limit reached (${quota.current}/${quota.limit}).`;
+    throw new HttpsError("resource-exhausted", message);
+  }
+}
+
 // ── generateContent ──────────────────────────────────────────────────────────
 
 export const generateContent = onCall(
@@ -76,10 +106,16 @@ export const generateContent = onCall(
       throw new HttpsError("unauthenticated", "Authentication required.");
     }
 
+    const uid = request.auth.uid;
+    const email = request.auth.token.email || "";
+    const displayName = request.auth.token.name || "";
+
     const { prompt, responseSchema } = request.data as GenerateContentInput;
     if (!prompt) {
       throw new HttpsError("invalid-argument", "prompt is required.");
     }
+
+    await enforceQuotaAndIncrement(uid, email, displayName);
 
     const ai = getAiClient();
 
@@ -111,10 +147,16 @@ export const generateImage = onCall(
       throw new HttpsError("unauthenticated", "Authentication required.");
     }
 
+    const uid = request.auth.uid;
+    const email = request.auth.token.email || "";
+    const displayName = request.auth.token.name || "";
+
     const { prompt, aspectRatio } = request.data as GenerateImageInput;
     if (!prompt) {
       throw new HttpsError("invalid-argument", "prompt is required.");
     }
+
+    await enforceQuotaAndIncrement(uid, email, displayName);
 
     const ai = getAiClient();
 
@@ -215,6 +257,10 @@ export const generateVideo = onCall(
       throw new HttpsError("unauthenticated", "Authentication required.");
     }
 
+    const uid = request.auth.uid;
+    const email = request.auth.token.email || "";
+    const displayName = request.auth.token.name || "";
+
     const { referenceImages, prompt, contentId } = request.data as GenerateVideoInput;
     if (!referenceImages || referenceImages.length === 0) {
       throw new HttpsError("invalid-argument", "referenceImages is required.");
@@ -222,6 +268,8 @@ export const generateVideo = onCall(
     if (!contentId || typeof contentId !== "string") {
       throw new HttpsError("invalid-argument", "contentId is required.");
     }
+
+    await enforceQuotaAndIncrement(uid, email, displayName);
 
     // Resolve any URL-based reference images server-side
     const resolvedImages = await Promise.all(referenceImages.map(resolveReferenceImage));
@@ -277,7 +325,6 @@ export const generateVideo = onCall(
       unlink(tmpPath).catch(() => {});
 
       // Upload to Firebase Storage
-      const uid = request.auth!.uid;
       const filePath = `users/${uid}/content/${contentId}/video.mp4`;
       const bucket = getStorage().bucket();
       const file = bucket.file(filePath);
@@ -317,10 +364,16 @@ export const generateLandingPage = onCall(
       throw new HttpsError("unauthenticated", "Authentication required.");
     }
 
+    const uid = request.auth.uid;
+    const email = request.auth.token.email || "";
+    const displayName = request.auth.token.name || "";
+
     const { conversationHistory, currentHtml } = request.data as GenerateLandingPageInput;
     if (!conversationHistory || conversationHistory.length === 0) {
       throw new HttpsError("invalid-argument", "conversationHistory is required.");
     }
+
+    await enforceQuotaAndIncrement(uid, email, displayName);
 
     const ai = getAiClient();
 
@@ -363,16 +416,26 @@ export const generateCampaignContent = onCall(
       throw new HttpsError("unauthenticated", "Authentication required.");
     }
 
+    const userId = request.auth.uid;
+    const email = request.auth.token.email || "";
+    const displayName = request.auth.token.name || "";
+
     const { campaignId } = request.data as GenerateCampaignInput;
     if (!campaignId || typeof campaignId !== "string") {
       throw new HttpsError("invalid-argument", "campaignId is required.");
     }
 
+    // Atomic quota check + increment BEFORE job creation.
+    // This must happen before createJobIfNoActive because the job doc write
+    // triggers processGenerationJob (onDocumentCreated) immediately. If we
+    // incremented after, a concurrent request could exhaust quota between
+    // the pre-check and the increment, leaving a pipeline running without
+    // a reserved quota slot.
+    await enforceQuotaAndIncrement(userId, email, displayName);
+
     const jobId = `job-${randomUUID()}`;
-    const userId = request.auth.uid;
 
     try {
-      // Atomically check for active jobs and create in a single transaction
       await createJobIfNoActive(jobId, {
         userId,
         campaignId,
@@ -384,15 +447,18 @@ export const generateCampaignContent = onCall(
         itemsTotal: 0,
         retryCount: 0,
       });
-
-      return { jobId };
     } catch (error: any) {
+      // Refund the quota slot since no generation work will be performed.
+      try { await decrementUsage(userId); } catch { /* best-effort refund */ }
+
       if (error.message === "ACTIVE_JOB_EXISTS") {
         throw new HttpsError("already-exists", "A generation job is already running for this campaign.");
       }
       console.error("generateCampaignContent error:", error);
       throw new HttpsError("internal", error.message || "Failed to create generation job.");
     }
+
+    return { jobId };
   }
 );
 
@@ -446,6 +512,337 @@ export const processGenerationJob = onDocumentCreated(
       }
       // Note: clearJobLock is handled by the orchestrator's finally block
     }
+  }
+);
+
+// ── getUserProfileAndUsage ────────────────────────────────────────────────
+
+export const getUserProfileAndUsage = onCall(
+  { timeoutSeconds: 10, memory: "256MiB", cors: true },
+  async (request) => {
+    if (!request.auth) {
+      throw new HttpsError("unauthenticated", "Authentication required.");
+    }
+
+    const uid = request.auth.uid;
+    const email = request.auth.token.email || "";
+    const displayName = request.auth.token.name || "";
+
+    const profile = await getOrCreateUserProfile(uid, email, displayName);
+    const usage = await getDailyUsage(uid);
+
+    return {
+      tier: profile.tier,
+      stripeSubscriptionStatus: profile.stripeSubscriptionStatus || null,
+      generationCount: usage?.generationCount ?? 0,
+      limit: TIER_LIMITS[profile.tier],
+    };
+  }
+);
+
+// ── Stripe Price IDs ──────────────────────────────────────────────────────
+// These should match the price IDs created in Stripe Dashboard.
+const STRIPE_PRICE_MONTHLY = "price_1SytIoLBuAaEt1w5cwVG8pBB";
+const STRIPE_PRICE_YEARLY = "price_1SytIqLBuAaEt1w5mFKDKE7V";
+
+const getStripe = () => new Stripe(STRIPE_SECRET_KEY.value());
+
+// Validate returnUrl to prevent open redirect attacks.
+// Requires same-origin match when Origin header is available, otherwise
+// restricts to localhost (dev). Rejects all other URLs without a verified origin.
+function validateReturnUrl(url: string, requestOrigin?: string): string {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    throw new HttpsError("invalid-argument", "returnUrl must be a valid URL.");
+  }
+  const isLocalhost = parsed.hostname === "localhost" || parsed.hostname === "127.0.0.1";
+  if (parsed.protocol !== "https:" && !(isLocalhost && parsed.protocol === "http:")) {
+    throw new HttpsError("invalid-argument", "returnUrl must use HTTPS.");
+  }
+  if (parsed.username || parsed.password) {
+    throw new HttpsError("invalid-argument", "returnUrl must not contain credentials.");
+  }
+  // Restrict to same origin to prevent open redirects
+  if (requestOrigin) {
+    try {
+      const originParsed = new URL(requestOrigin);
+      if (parsed.origin !== originParsed.origin) {
+        throw new HttpsError("invalid-argument", "returnUrl must match the request origin.");
+      }
+    } catch (e) {
+      if (e instanceof HttpsError) throw e;
+      // If origin header can't be parsed, fall through to localhost check
+    }
+  } else if (!isLocalhost) {
+    // No Origin header and not localhost — reject to prevent open redirects
+    throw new HttpsError("invalid-argument", "returnUrl origin could not be verified.");
+  }
+  return url;
+}
+
+// ── createCheckoutSession ─────────────────────────────────────────────────
+
+export const createCheckoutSession = onCall(
+  { timeoutSeconds: 30, memory: "256MiB", secrets: [STRIPE_SECRET_KEY], cors: true },
+  async (request) => {
+    if (!request.auth) {
+      throw new HttpsError("unauthenticated", "Authentication required.");
+    }
+
+    const uid = request.auth.uid;
+    const email = request.auth.token.email || "";
+    const displayName = request.auth.token.name || "";
+
+    const profile = await getOrCreateUserProfile(uid, email, displayName);
+
+    // Prevent duplicate subscriptions for users who are already Pro
+    if (profile.tier === "pro" && profile.stripeSubscriptionStatus === "active") {
+      throw new HttpsError("already-exists", "You already have an active Pro subscription.");
+    }
+
+    const stripe = getStripe();
+
+    // Reuse existing Stripe customer or create a new one.
+    // Stripe customer creation is done OUTSIDE the transaction to avoid
+    // orphan customers if the transaction retries due to contention.
+    const userRef = getFirestore().collection("users").doc(uid);
+
+    // Fast path: check if customer already exists (no transaction needed)
+    const existingSnap = await userRef.get();
+    let customerId = existingSnap.data()?.stripeCustomerId as string | undefined;
+
+    if (!customerId) {
+      // Create Stripe customer outside the transaction (idempotent-safe:
+      // worst case we create one extra customer but never use it).
+      const customer = await stripe.customers.create({
+        email,
+        name: displayName,
+        metadata: { firebaseUid: uid },
+      });
+
+      // Use a transaction to write the customer ID only if another call
+      // didn't already set one (prevents overwriting a concurrent winner).
+      customerId = await getFirestore().runTransaction(async (tx) => {
+        const snap = await tx.get(userRef);
+        const existingId = snap.data()?.stripeCustomerId;
+        if (existingId) return existingId as string;
+
+        tx.update(userRef, {
+          stripeCustomerId: customer.id,
+          updatedAt: FieldValue.serverTimestamp(),
+        });
+        return customer.id;
+      });
+    }
+
+    // Determine which price to use (default: monthly)
+    const { interval, returnUrl } = (request.data || {}) as {
+      interval?: "monthly" | "yearly";
+      returnUrl?: string;
+    };
+    const priceId = interval === "yearly" ? STRIPE_PRICE_YEARLY : STRIPE_PRICE_MONTHLY;
+    if (!returnUrl) {
+      throw new HttpsError("invalid-argument", "returnUrl is required.");
+    }
+    const origin = request.rawRequest?.headers?.origin as string | undefined;
+    const baseReturnUrl = validateReturnUrl(returnUrl, origin);
+
+    const session = await stripe.checkout.sessions.create({
+      customer: customerId,
+      mode: "subscription",
+      line_items: [{ price: priceId, quantity: 1 }],
+      success_url: `${baseReturnUrl}?billing=success`,
+      cancel_url: `${baseReturnUrl}?billing=canceled`,
+      metadata: { firebaseUid: uid },
+    });
+
+    return { sessionId: session.id, url: session.url };
+  }
+);
+
+// ── createPortalSession ───────────────────────────────────────────────────
+
+export const createPortalSession = onCall(
+  { timeoutSeconds: 30, memory: "256MiB", secrets: [STRIPE_SECRET_KEY], cors: true },
+  async (request) => {
+    if (!request.auth) {
+      throw new HttpsError("unauthenticated", "Authentication required.");
+    }
+
+    const uid = request.auth.uid;
+    const profile = await getUserProfile(uid);
+
+    if (!profile?.stripeCustomerId) {
+      throw new HttpsError("failed-precondition", "No billing account found. Please subscribe first.");
+    }
+
+    const { returnUrl } = (request.data || {}) as { returnUrl?: string };
+    if (!returnUrl) {
+      throw new HttpsError("invalid-argument", "returnUrl is required.");
+    }
+    const origin = request.rawRequest?.headers?.origin as string | undefined;
+    const baseReturnUrl = validateReturnUrl(returnUrl, origin);
+
+    const stripe = getStripe();
+    const session = await stripe.billingPortal.sessions.create({
+      customer: profile.stripeCustomerId,
+      return_url: baseReturnUrl,
+    });
+
+    return { url: session.url };
+  }
+);
+
+// ── stripeWebhook ─────────────────────────────────────────────────────────
+
+export const stripeWebhook = onRequest(
+  { timeoutSeconds: 30, memory: "256MiB", secrets: [STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET], cors: false },
+  async (req, res) => {
+    if (req.method !== "POST") {
+      res.status(405).send("Method Not Allowed");
+      return;
+    }
+
+    const stripe = getStripe();
+    const sig = req.headers["stripe-signature"];
+    if (!sig) {
+      res.status(400).send("Missing stripe-signature header.");
+      return;
+    }
+
+    let event: Stripe.Event;
+    try {
+      event = stripe.webhooks.constructEvent(
+        req.rawBody,
+        sig,
+        STRIPE_WEBHOOK_SECRET.value()
+      );
+    } catch (err: any) {
+      console.error("Webhook signature verification failed:", err.message);
+      res.status(400).send("Webhook signature verification failed.");
+      return;
+    }
+
+    // Idempotency: use create() which fails if the document already exists,
+    // preventing race conditions from concurrent webhook deliveries.
+    const db = getFirestore();
+    const eventRef = db.collection("stripeEvents").doc(event.id);
+    try {
+      await eventRef.create({
+        type: event.type,
+        processedAt: FieldValue.serverTimestamp(),
+      });
+    } catch (err: any) {
+      if (err.code === 6 /* ALREADY_EXISTS */) {
+        res.status(200).json({ received: true, duplicate: true });
+        return;
+      }
+      console.error(`Failed to create idempotency record for ${event.id}:`, err);
+      res.status(500).send("Internal error");
+      return;
+    }
+
+    // Safely extract a string customer ID from Stripe objects (can be string or expanded object)
+    const getCustomerId = (customer: string | Stripe.Customer | Stripe.DeletedCustomer | null): string | null =>
+      typeof customer === "string" ? customer : customer?.id ?? null;
+
+    try {
+      switch (event.type) {
+        case "checkout.session.completed": {
+          const session = event.data.object as Stripe.Checkout.Session;
+          const customerId = getCustomerId(session.customer);
+          const subscriptionId = typeof session.subscription === "string"
+            ? session.subscription : session.subscription?.id ?? null;
+
+          if (!customerId) {
+            console.error(`checkout.session.completed: no customer ID in session`);
+            break;
+          }
+          const uid = await findUidByCustomerId(customerId);
+          if (uid && subscriptionId) {
+            await updateUserProfile(uid, {
+              tier: "pro" as UserTier,
+              stripeSubscriptionId: subscriptionId,
+              stripeSubscriptionStatus: "active",
+            });
+          } else if (!uid) {
+            console.error(`checkout.session.completed: no user found for Stripe customer ${customerId}`);
+          } else if (!subscriptionId) {
+            console.error(`checkout.session.completed: no subscription ID in session for customer ${customerId} (uid: ${uid})`);
+          }
+          break;
+        }
+
+        case "customer.subscription.updated": {
+          const subscription = event.data.object as Stripe.Subscription;
+          const customerId = getCustomerId(subscription.customer);
+          if (!customerId) {
+            console.error(`customer.subscription.updated: no customer ID in subscription`);
+            break;
+          }
+          const uid = await findUidByCustomerId(customerId);
+
+          if (uid) {
+            const status = subscription.status;
+            // Keep pro access during payment retry (past_due) to avoid
+            // cutting off users for a single failed charge.
+            const tier: UserTier = (status === "active" || status === "trialing" || status === "past_due") ? "pro" : "free";
+            await updateUserProfile(uid, {
+              tier,
+              stripeSubscriptionId: subscription.id,
+              stripeSubscriptionStatus: status,
+            });
+          } else {
+            console.error(`customer.subscription.updated: no user found for Stripe customer ${customerId}`);
+          }
+          break;
+        }
+
+        case "customer.subscription.deleted": {
+          const subscription = event.data.object as Stripe.Subscription;
+          const customerId = getCustomerId(subscription.customer);
+          if (!customerId) {
+            console.error(`customer.subscription.deleted: no customer ID in subscription`);
+            break;
+          }
+          const uid = await findUidByCustomerId(customerId);
+
+          if (uid) {
+            // Use direct Firestore update to leverage FieldValue.delete()
+            const userRef = getFirestore().collection("users").doc(uid);
+            await userRef.update({
+              tier: "free" as UserTier,
+              stripeSubscriptionId: FieldValue.delete(),
+              stripeSubscriptionStatus: "canceled",
+              updatedAt: FieldValue.serverTimestamp(),
+            });
+          } else {
+            console.error(`customer.subscription.deleted: no user found for Stripe customer ${customerId}`);
+          }
+          break;
+        }
+
+        default:
+          // Unhandled event type — acknowledge silently
+          break;
+      }
+    } catch (err: any) {
+      console.error(`Error processing webhook event ${event.id}:`, err);
+      // Delete the idempotency record so Stripe can retry this event.
+      // Returning 500 tells Stripe to retry, and deleting the record
+      // ensures the retry won't be treated as a duplicate.
+      try {
+        await eventRef.delete();
+      } catch (deleteErr) {
+        console.error(`Failed to delete idempotency record for ${event.id}:`, deleteErr);
+      }
+      res.status(500).send("Webhook processing error");
+      return;
+    }
+
+    res.status(200).json({ received: true });
   }
 );
 

@@ -10,13 +10,16 @@ import { CampaignDetail } from './components/CampaignDetail';
 import { ComplianceRules } from './components/ComplianceRules';
 import { BrandManager } from './components/BrandManager';
 import { LandingPageGenerator } from './components/LandingPageGenerator';
-import { Product, Campaign, GeneratedContent, ComplianceRule, Brand, LandingPageProject } from './types';
+import { Settings } from './components/Settings';
+import { Product, Campaign, GeneratedContent, ComplianceRule, Brand, LandingPageProject, UsageInfo } from './types';
 import { Loader2 } from 'lucide-react';
 import * as storage from './services/storageService';
 import { uploadContentImages, isBase64DataUrl } from './services/fileStorage';
 import { AuthScreen } from './components/AuthScreen';
+import { MarketingLandingPage } from './components/MarketingLandingPage';
 import { onAuthChange, logOut } from './services/authService';
 import { getShopifyStatus, ShopifyStatus } from './services/shopifyService';
+import { fetchUserProfileAndUsage } from './services/stripeService';
 import type { User } from 'firebase/auth';
 
 // Seed Data
@@ -162,12 +165,16 @@ function App() {
   const [authLoading, setAuthLoading] = useState(true);
   const [isLoadingData, setIsLoadingData] = useState(true);
   const [shopifyStatus, setShopifyStatus] = useState<ShopifyStatus>({ connected: false });
+  const [usageInfo, setUsageInfo] = useState<UsageInfo | null>(null);
 
   // Listen for auth state changes
   useEffect(() => {
     const unsubscribe = onAuthChange((user) => {
       setCurrentUser(user);
       setAuthLoading(false);
+      if (!user) {
+        setUsageInfo(null);
+      }
     });
     return unsubscribe;
   }, []);
@@ -178,6 +185,15 @@ function App() {
       setShopifyStatus(status);
     } catch {
       // Shopify status fetch failed — non-critical
+    }
+  }, []);
+
+  const refreshUsage = useCallback(async () => {
+    try {
+      const info = await fetchUserProfileAndUsage();
+      setUsageInfo(info);
+    } catch {
+      // Usage fetch failed — non-critical
     }
   }, []);
 
@@ -254,7 +270,8 @@ function App() {
     };
     loadData();
     refreshShopifyStatus();
-  }, [currentUser, refreshShopifyStatus]);
+    refreshUsage();
+  }, [currentUser, refreshShopifyStatus, refreshUsage]);
 
   const handleComplianceRuleCreate = (rule: ComplianceRule) => {
     setComplianceRules(prev => [rule, ...prev]);
@@ -456,7 +473,7 @@ function App() {
     }
   };
 
-  if (authLoading || isLoadingData) {
+  if (authLoading) {
     return (
       <div className="h-screen flex flex-col items-center justify-center bg-slate-50 text-slate-400">
         <Loader2 className="animate-spin mb-2" size={32} />
@@ -466,12 +483,29 @@ function App() {
   }
 
   if (!currentUser) {
-    return <AuthScreen />;
+    return (
+      <Router>
+        <Routes>
+          <Route path="/" element={<MarketingLandingPage />} />
+          <Route path="/auth" element={<AuthScreen />} />
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+      </Router>
+    );
+  }
+
+  if (isLoadingData) {
+    return (
+      <div className="h-screen flex flex-col items-center justify-center bg-slate-50 text-slate-400">
+        <Loader2 className="animate-spin mb-2" size={32} />
+        <span>Loading MarketGen AI...</span>
+      </div>
+    );
   }
 
   return (
     <Router>
-      <Layout onSignOut={logOut} userName={currentUser.displayName || currentUser.email || 'User'}>
+      <Layout onSignOut={logOut} userName={currentUser.displayName || currentUser.email || 'User'} usageInfo={usageInfo}>
         <Routes>
           <Route path="/" element={<Dashboard />} />
           <Route path="/campaigns" element={<CampaignList campaigns={campaigns} />} />
@@ -496,6 +530,8 @@ function App() {
                 onUpdateContent={handleContentStoreUpdate}
                 onUpdateCampaign={handleCampaignUpdate}
                 onUpdateItem={handleUpdateItem}
+                usageInfo={usageInfo}
+                onRefreshUsage={refreshUsage}
               />
             } 
           />
@@ -539,6 +575,16 @@ function App() {
                 landingPages={landingPages}
                 onSave={handleLandingPageSave}
                 onDelete={handleLandingPageDelete}
+                onRefreshUsage={refreshUsage}
+              />
+            }
+          />
+          <Route
+            path="/settings"
+            element={
+              <Settings
+                usageInfo={usageInfo}
+                onRefreshUsage={refreshUsage}
               />
             }
           />

@@ -10,6 +10,7 @@ interface LandingPageGeneratorProps {
   landingPages: LandingPageProject[];
   onSave: (project: LandingPageProject) => void;
   onDelete: (id: string) => void;
+  onRefreshUsage?: () => void;
 }
 
 type Phase = 'initial' | 'loading-interview' | 'interview' | 'chat';
@@ -23,7 +24,7 @@ const createNewProject = (): LandingPageProject => ({
   updatedAt: Date.now(),
 });
 
-export const LandingPageGenerator: React.FC<LandingPageGeneratorProps> = ({ landingPages, onSave, onDelete }) => {
+export const LandingPageGenerator: React.FC<LandingPageGeneratorProps> = ({ landingPages, onSave, onDelete, onRefreshUsage }) => {
   const [activeProject, setActiveProject] = useState<LandingPageProject>(() => {
     return landingPages[0] || createNewProject();
   });
@@ -95,13 +96,18 @@ export const LandingPageGenerator: React.FC<LandingPageGeneratorProps> = ({ land
         setPhase('chat');
         saveProject(allMessages, response.html, text);
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('Interview fetch error:', error);
-      const errorMsg: ChatMessage = { id: `msg-${Date.now()}-err`, role: 'assistant', content: 'Sorry, something went wrong starting the interview. Please try again.', timestamp: Date.now() };
+      const isQuotaError = error?.code === 'functions/resource-exhausted';
+      const content = isQuotaError
+        ? 'Daily generation limit reached. Upgrade to Pro for more generations.'
+        : 'Sorry, something went wrong starting the interview. Please try again.';
+      const errorMsg: ChatMessage = { id: `msg-${Date.now()}-err`, role: 'assistant', content, timestamp: Date.now() };
       setMessages([errorMsg]);
       setPhase('chat');
     } finally {
       setIsLoading(false);
+      onRefreshUsage?.();
     }
   };
 
@@ -136,12 +142,17 @@ export const LandingPageGenerator: React.FC<LandingPageGeneratorProps> = ({ land
 
       if (response.html) setCurrentHtml(response.html);
       saveProject(allMessages, response.html, initialDescription);
-    } catch (error) {
+    } catch (error: any) {
       console.error('Generation error:', error);
-      const errorMsg: ChatMessage = { id: `msg-${Date.now()}-err`, role: 'assistant', content: 'Sorry, something went wrong. Please try again.', timestamp: Date.now() };
+      const isQuotaError = error?.code === 'functions/resource-exhausted';
+      const content = isQuotaError
+        ? 'Daily generation limit reached. Upgrade to Pro for more generations.'
+        : 'Sorry, something went wrong. Please try again.';
+      const errorMsg: ChatMessage = { id: `msg-${Date.now()}-err`, role: 'assistant', content, timestamp: Date.now() };
       setMessages([userMsg, errorMsg]);
     } finally {
       setIsLoading(false);
+      onRefreshUsage?.();
     }
   };
 
@@ -169,12 +180,17 @@ export const LandingPageGenerator: React.FC<LandingPageGeneratorProps> = ({ land
       if (response.html) setCurrentHtml(response.html);
 
       saveProject(allMessages, newHtml, undefined);
-    } catch (error) {
+    } catch (error: any) {
       console.error('Refinement error:', error);
-      const errorMsg: ChatMessage = { id: `msg-${Date.now()}-err`, role: 'assistant', content: 'Sorry, something went wrong. Please try again.', timestamp: Date.now() };
+      const isQuotaError = error?.code === 'functions/resource-exhausted';
+      const content = isQuotaError
+        ? 'Daily generation limit reached. Upgrade to Pro for more generations.'
+        : 'Sorry, something went wrong. Please try again.';
+      const errorMsg: ChatMessage = { id: `msg-${Date.now()}-err`, role: 'assistant', content, timestamp: Date.now() };
       setMessages((prev) => [...prev, errorMsg]);
     } finally {
       setIsLoading(false);
+      onRefreshUsage?.();
     }
   };
 

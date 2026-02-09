@@ -2,6 +2,33 @@
 // User Roles
 export type UserRole = 'admin' | 'marketer' | 'reviewer';
 
+// User Tiers & Billing
+export type UserTier = 'free' | 'pro';
+
+export interface UserProfile {
+  uid: string;
+  email: string;
+  displayName: string;
+  tier: UserTier;
+  stripeCustomerId?: string;
+  stripeSubscriptionId?: string;
+  stripeSubscriptionStatus?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface UsageInfo {
+  tier: UserTier;
+  stripeSubscriptionStatus?: string;
+  generationCount: number;
+  limit: number;
+}
+
+export const TIER_LIMITS: Record<UserTier, number> = {
+  free: 10,
+  pro: 100,
+};
+
 // Products
 export type ProductSource = 'internal' | 'shopify';
 
