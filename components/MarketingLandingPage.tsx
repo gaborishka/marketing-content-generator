@@ -282,13 +282,6 @@ export const MarketingLandingPage: React.FC = () => {
                 </div>
                 <h3 className="text-base font-semibold text-slate-900 mb-2">{s.title}</h3>
                 <p className="text-sm text-slate-500 leading-relaxed mb-4">{s.description}</p>
-                {i === 2 && (
-                  <img
-                    src="/screenshots/manual-content.png"
-                    alt="Adding content cards to the canvas manually"
-                    className="rounded-lg border border-slate-200 shadow-sm mt-2"
-                  />
-                )}
               </div>
             ))}
           </div>
