@@ -12,8 +12,7 @@ import { tmpdir } from "os";
 import { GEMINI_API_KEY } from "./utils/gemini";
 import {
   getOrCreateUserProfile,
-  checkQuota,
-  incrementUsage,
+  checkAndIncrementQuota,
   getDailyUsage,
   getUserProfile,
   updateUserProfile,
@@ -82,9 +81,12 @@ const getAiClient = () => new GoogleGenAI({ apiKey: GEMINI_API_KEY.value() });
 
 // ── Quota enforcement helper ─────────────────────────────────────────────────
 
-async function enforceQuota(uid: string, email: string, displayName: string): Promise<void> {
+// enforceQuotaAndIncrement atomically checks quota AND increments usage in a
+// single Firestore transaction, preventing concurrent requests from exceeding
+// the daily limit.
+async function enforceQuotaAndIncrement(uid: string, email: string, displayName: string): Promise<void> {
   await getOrCreateUserProfile(uid, email, displayName);
-  const quota = await checkQuota(uid);
+  const quota = await checkAndIncrementQuota(uid);
   if (!quota.allowed) {
     const message =
       quota.tier === "free"
@@ -112,8 +114,7 @@ export const generateContent = onCall(
       throw new HttpsError("invalid-argument", "prompt is required.");
     }
 
-    await enforceQuota(uid, email, displayName);
-    await incrementUsage(uid);
+    await enforceQuotaAndIncrement(uid, email, displayName);
 
     const ai = getAiClient();
 
@@ -154,8 +155,7 @@ export const generateImage = onCall(
       throw new HttpsError("invalid-argument", "prompt is required.");
     }
 
-    await enforceQuota(uid, email, displayName);
-    await incrementUsage(uid);
+    await enforceQuotaAndIncrement(uid, email, displayName);
 
     const ai = getAiClient();
 
@@ -268,8 +268,7 @@ export const generateVideo = onCall(
       throw new HttpsError("invalid-argument", "contentId is required.");
     }
 
-    await enforceQuota(uid, email, displayName);
-    await incrementUsage(uid);
+    await enforceQuotaAndIncrement(uid, email, displayName);
 
     // Resolve any URL-based reference images server-side
     const resolvedImages = await Promise.all(referenceImages.map(resolveReferenceImage));
@@ -373,8 +372,7 @@ export const generateLandingPage = onCall(
       throw new HttpsError("invalid-argument", "conversationHistory is required.");
     }
 
-    await enforceQuota(uid, email, displayName);
-    await incrementUsage(uid);
+    await enforceQuotaAndIncrement(uid, email, displayName);
 
     const ai = getAiClient();
 
@@ -426,8 +424,7 @@ export const generateCampaignContent = onCall(
       throw new HttpsError("invalid-argument", "campaignId is required.");
     }
 
-    await enforceQuota(userId, email, displayName);
-    await incrementUsage(userId);
+    await enforceQuotaAndIncrement(userId, email, displayName);
 
     const jobId = `job-${randomUUID()}`;
 
@@ -575,7 +572,10 @@ export const createCheckoutSession = onCall(
       returnUrl?: string;
     };
     const priceId = interval === "yearly" ? STRIPE_PRICE_YEARLY : STRIPE_PRICE_MONTHLY;
-    const baseReturnUrl = returnUrl || "https://localhost:3000/#/settings";
+    if (!returnUrl) {
+      throw new HttpsError("invalid-argument", "returnUrl is required.");
+    }
+    const baseReturnUrl = returnUrl;
 
     const session = await stripe.checkout.sessions.create({
       customer: customerId,
@@ -607,7 +607,10 @@ export const createPortalSession = onCall(
     }
 
     const { returnUrl } = (request.data || {}) as { returnUrl?: string };
-    const baseReturnUrl = returnUrl || "https://localhost:3000/#/settings";
+    if (!returnUrl) {
+      throw new HttpsError("invalid-argument", "returnUrl is required.");
+    }
+    const baseReturnUrl = returnUrl;
 
     const stripe = getStripe();
     const session = await stripe.billingPortal.sessions.create({

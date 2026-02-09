@@ -32,19 +32,17 @@ export const Settings: React.FC<SettingsProps> = ({ usageInfo, onRefreshUsage })
   const [checkoutLoading, setCheckoutLoading] = useState(false);
   const [portalLoading, setPortalLoading] = useState(false);
 
+  const billing = searchParams.get('billing');
   useEffect(() => {
-    const billing = searchParams.get('billing');
     if (billing === 'success') {
       setToast({ message: 'Subscription activated! Welcome to Pro.', type: 'success' });
       onRefreshUsage();
-      searchParams.delete('billing');
-      setSearchParams(searchParams, { replace: true });
+      setSearchParams((prev) => { prev.delete('billing'); return prev; }, { replace: true });
     } else if (billing === 'canceled') {
       setToast({ message: 'Checkout canceled. No changes were made.', type: 'info' });
-      searchParams.delete('billing');
-      setSearchParams(searchParams, { replace: true });
+      setSearchParams((prev) => { prev.delete('billing'); return prev; }, { replace: true });
     }
-  }, [searchParams, setSearchParams, onRefreshUsage]);
+  }, [billing, setSearchParams, onRefreshUsage]);
 
   useEffect(() => {
     if (toast) {

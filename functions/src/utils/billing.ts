@@ -119,6 +119,48 @@ export async function checkQuota(uid: string): Promise<QuotaResult> {
   };
 }
 
+// ── Atomic Quota Check + Increment ────────────────────────────────────────
+// Uses a Firestore transaction to atomically read the usage count, verify
+// the quota, and increment — preventing concurrent requests from exceeding
+// the daily limit.
+
+export async function checkAndIncrementQuota(uid: string): Promise<QuotaResult> {
+  const firestore = db();
+  const profileRef = firestore.collection("users").doc(uid);
+  const date = todayDateString();
+  const usageRef = profileRef.collection("usage").doc(date);
+
+  return firestore.runTransaction(async (tx) => {
+    const profileSnap = await tx.get(profileRef);
+    const tier: UserTier = (profileSnap.data()?.tier as UserTier) ?? "free";
+    const limit = TIER_LIMITS[tier];
+
+    const usageSnap = await tx.get(usageRef);
+    const current = (usageSnap.data() as DailyUsageDoc | undefined)?.generationCount ?? 0;
+
+    if (current >= limit) {
+      return { allowed: false, current, limit, tier };
+    }
+
+    // Increment within the same transaction
+    if (usageSnap.exists) {
+      tx.update(usageRef, {
+        generationCount: FieldValue.increment(1),
+        updatedAt: FieldValue.serverTimestamp(),
+      });
+    } else {
+      tx.set(usageRef, {
+        uid,
+        date,
+        generationCount: 1,
+        updatedAt: FieldValue.serverTimestamp(),
+      });
+    }
+
+    return { allowed: true, current: current + 1, limit, tier };
+  });
+}
+
 // ── Stripe Customer Lookup ────────────────────────────────────────────────
 
 export async function findUidByCustomerId(customerId: string): Promise<string | null> {
