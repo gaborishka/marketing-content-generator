@@ -44,14 +44,11 @@ export async function saveComplianceCheck(
   const docId = `check_${ruleId}_${Date.now()}`;
   const checkRef = doc(collection(db, 'complianceChecks'), docId);
 
-  const checkDoc: Omit<ComplianceCheckDoc, 'id'> = {
+  const checkDoc: Record<string, unknown> = {
     userId,
     ruleId,
     ruleName,
     checkType,
-    campaignId: options.campaignId,
-    campaignName: options.campaignName,
-    contentIds: options.contentIds,
     total: results.length,
     passed,
     failed,
@@ -59,6 +56,11 @@ export async function saveComplianceCheck(
     checkedAt: new Date().toISOString(),
     createdAt: new Date().toISOString(),
   };
+
+  // Only include optional fields if defined (Firestore rejects undefined values)
+  if (options.campaignId !== undefined) checkDoc.campaignId = options.campaignId;
+  if (options.campaignName !== undefined) checkDoc.campaignName = options.campaignName;
+  if (options.contentIds !== undefined) checkDoc.contentIds = options.contentIds;
 
   await setDoc(checkRef, checkDoc);
   return docId;
