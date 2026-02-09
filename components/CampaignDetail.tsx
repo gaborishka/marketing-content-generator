@@ -48,7 +48,9 @@ import { VideoStoryboardModal } from './VideoStoryboardModal';
 import { ContentDetailModal } from './ContentDetailModal';
 import { ContentCreationModal } from './ContentCreationModal';
 import { ContentAIAssistant } from './ContentAIAssistant';
+import { ContentHistoryModal } from './ContentHistoryModal';
 import { FilterPanel, ContentFilters, INITIAL_FILTERS } from './FilterPanel';
+import { saveContentChange } from '../services/contentHistoryService';
 
 interface CampaignDetailProps {
   campaigns: Campaign[];
@@ -106,6 +108,7 @@ export const CampaignDetail: React.FC<CampaignDetailProps> = ({
   const [editingContentId, setEditingContentId] = useState<string | null>(null);
   const [detailContentId, setDetailContentId] = useState<string | null>(null);
   const [aiAssistantContentId, setAiAssistantContentId] = useState<string | null>(null);
+  const [isHistoryModalOpen, setIsHistoryModalOpen] = useState(false);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [canvasFocusTarget, setCanvasFocusTarget] = useState<{ x: number; y: number; timestamp: number } | null>(null);
   const [creationModal, setCreationModal] = useState<{
@@ -278,7 +281,7 @@ export const CampaignDetail: React.FC<CampaignDetailProps> = ({
   useEffect(() => {
     if (!activeJobId || !campaign) return;
 
-    const unsub = subscribeToContent(campaign.id, (firestoreContent) => {
+    const unsub = subscribeToContent(campaign.id, async (firestoreContent) => {
       // Merge Firestore-generated content into the content store.
       // Only include items from the active generation job.
       const jobContent = firestoreContent.filter(
@@ -290,6 +293,27 @@ export const CampaignDetail: React.FC<CampaignDetailProps> = ({
       // Use refs to get latest values, avoiding stale closures
       const currentContentStore = contentStoreRef.current;
       const currentCampaign = campaignRef.current;
+
+      // Track history for newly generated content
+      const newContent = jobContent.filter(c => {
+        const existing = currentContentStore.find(ex => ex.id === c.id);
+        return !existing || existing.status === 'generating';
+      });
+
+      // Save history for new content
+      for (const content of newContent) {
+        try {
+          await saveContentChange({
+            contentId: content.id,
+            campaignId: content.campaignId,
+            changeType: 'generated',
+            newVersion: content,
+            description: `Content generated: ${content.channel} for ${content.audience}`
+          });
+        } catch (error) {
+          console.error('Failed to save generation history:', error);
+        }
+      }
 
       // Assign canvas positions to new items that don't have them yet.
       // Exclude current job items from startX calculation to prevent drift on re-snapshots.
@@ -375,8 +399,26 @@ export const CampaignDetail: React.FC<CampaignDetailProps> = ({
     onUpdateContent(contentStore.filter(c => c.id !== id));
   };
 
-  const handleManualContentCreate = (newContent: GeneratedContent) => {
+  const handleManualContentCreate = async (newContent: GeneratedContent) => {
     onUpdateContent([...contentStore, newContent]);
+    
+    // Track history for manually created content
+    try {
+      const changeType = newContent.id.startsWith('manual-') ? 'pasted' : 'imported';
+      await saveContentChange({
+        contentId: newContent.id,
+        campaignId: newContent.campaignId,
+        changeType,
+        newVersion: newContent,
+        description: `Content ${changeType === 'pasted' ? 'pasted/created' : 'imported'}: ${newContent.channel} for ${newContent.audience}`,
+        metadata: {
+          position: { x: newContent.x, y: newContent.y },
+          source: changeType === 'imported' ? 'external' : 'manual'
+        }
+      });
+    } catch (error) {
+      console.error('Failed to save manual content history:', error);
+    }
   };
 
   const handleGenerateMore = async () => {
@@ -585,7 +627,10 @@ export const CampaignDetail: React.FC<CampaignDetailProps> = ({
               />
             )}
           </div>
-          <button className="flex items-center space-x-2 px-3 py-1.5 text-sm font-medium text-slate-600 bg-white border border-slate-300 rounded-lg hover:bg-slate-50">
+          <button
+            onClick={() => setIsHistoryModalOpen(true)}
+            className="flex items-center space-x-2 px-3 py-1.5 text-sm font-medium text-slate-600 bg-white border border-slate-300 rounded-lg hover:bg-slate-50"
+          >
             <History size={16} />
             <span>History</span>
           </button>
@@ -1102,6 +1147,35 @@ export const CampaignDetail: React.FC<CampaignDetailProps> = ({
           onClose={() => setAiAssistantContentId(null)}
           onUpdate={(updated) => {
             onUpdateItem(updated);
+          }}
+        />
+      )}
+
+      {isHistoryModalOpen && campaign && (
+        <ContentHistoryModal
+          campaignId={campaign.id}
+          contentItems={campaignContent}
+          onClose={() => setIsHistoryModalOpen(false)}
+          onRollback={async (contentId, version) => {
+            // Find the current version
+            const current = contentStore.find(c => c.id === contentId);
+            if (current) {
+              // Save rollback to history
+              try {
+                await saveContentChange({
+                  contentId,
+                  campaignId: campaign.id,
+                  changeType: 'manual_edit',
+                  previousVersion: current,
+                  newVersion: version,
+                  description: 'Rolled back to previous version'
+                });
+              } catch (error) {
+                console.error('Failed to save rollback history:', error);
+              }
+              // Update the content
+              onUpdateItem(version);
+            }
           }}
         />
       )}

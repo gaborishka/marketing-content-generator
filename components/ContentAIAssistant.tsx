@@ -18,6 +18,7 @@ import { GeneratedContent, Campaign } from '../types';
 import { chatWithAIForContent } from '../services/contentAIService';
 import { generateImage } from '../services/geminiClient';
 import { getAspectRatioForChannel } from '../services/imageHelpers';
+import { saveContentChange } from '../services/contentHistoryService';
 import { RevealImage } from './RevealImage';
 
 interface ChatMessage {
@@ -187,13 +188,34 @@ export const ContentAIAssistant: React.FC<ContentAIAssistantProps> = ({
     }));
   };
 
-  const handleApply = () => {
+  const handleApply = async () => {
     if (pendingChanges) {
       // Preserve all original content fields, only update the changed ones
       const updated: GeneratedContent = {
         ...content,
         ...pendingChanges
       };
+      
+      // Track history before updating
+      try {
+        const lastMessage = messages[messages.length - 1];
+        const aiPrompt = lastMessage?.role === 'user' ? lastMessage.content : undefined;
+        
+        await saveContentChange({
+          contentId: content.id,
+          campaignId: content.campaignId,
+          changeType: 'ai_modified',
+          previousVersion: content,
+          newVersion: updated,
+          description: `Modified via AI: ${changedFields.has('headline') ? 'headline' : ''} ${changedFields.has('body') ? 'body' : ''} ${changedFields.has('image') ? 'image' : ''}`.trim(),
+          metadata: {
+            aiPrompt
+          }
+        });
+      } catch (error) {
+        console.error('Failed to save history:', error);
+      }
+      
       // Ensure userId and other required fields are preserved
       onUpdate(updated);
       setPendingChanges(null);
