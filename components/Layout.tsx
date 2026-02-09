@@ -5,6 +5,7 @@ import {
   Package,
   Palette,
   ShieldCheck,
+  Globe,
   Settings,
   Menu,
   Bell,
@@ -37,7 +38,7 @@ const SidebarItem = ({ icon: Icon, label, path, active }: { icon: any, label: st
 export const Layout: React.FC<LayoutProps> = ({ children, onSignOut, userName }) => {
   const location = useLocation();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const isCanvasRoute = /^\/campaigns\/[^/]+$/.test(location.pathname) && location.pathname !== '/campaigns/new';
+  const isCanvasRoute = (/^\/campaigns\/[^/]+$/.test(location.pathname) && location.pathname !== '/campaigns/new') || location.pathname.startsWith('/landing');
 
   return (
     <div className="flex h-screen bg-slate-50 overflow-hidden">
@@ -86,10 +87,16 @@ export const Layout: React.FC<LayoutProps> = ({ children, onSignOut, userName })
             active={location.pathname.startsWith('/compliance-rules')}
           />
           <SidebarItem
+            icon={Globe}
+            label="Landing Pages"
+            path="/landing"
+            active={location.pathname.startsWith('/landing')}
+          />
+          <SidebarItem
             icon={Settings}
-            label="Settings" 
-            path="/settings" 
-            active={location.pathname === '/settings'} 
+            label="Settings"
+            path="/settings"
+            active={location.pathname === '/settings'}
           />
         </nav>
 

@@ -9,6 +9,7 @@ import { join } from "path";
 import { readFile, unlink } from "fs/promises";
 import { tmpdir } from "os";
 import { GEMINI_API_KEY } from "./utils/gemini";
+import { buildLandingPageSystemPrompt, parseLandingPageResponse, mapMessageToGeminiContent } from "./prompts/landingPage.prompt";
 import {
   SHOPIFY_CLIENT_ID,
   SHOPIFY_CLIENT_SECRET,
@@ -298,6 +299,48 @@ export const generateVideo = onCall(
       if (error instanceof HttpsError) throw error;
       console.error("generateVideo error:", error);
       throw new HttpsError("internal", error.message || "Video generation failed.");
+    }
+  }
+);
+
+// ── generateLandingPage ──────────────────────────────────────────────────────
+
+interface GenerateLandingPageInput {
+  conversationHistory: { role: string; content: string; images?: string[] }[];
+  currentHtml?: string;
+}
+
+export const generateLandingPage = onCall(
+  { timeoutSeconds: 120, memory: "1GiB", secrets: [GEMINI_API_KEY], cors: true },
+  async (request) => {
+    if (!request.auth) {
+      throw new HttpsError("unauthenticated", "Authentication required.");
+    }
+
+    const { conversationHistory, currentHtml } = request.data as GenerateLandingPageInput;
+    if (!conversationHistory || conversationHistory.length === 0) {
+      throw new HttpsError("invalid-argument", "conversationHistory is required.");
+    }
+
+    const ai = getAiClient();
+
+    const contents = conversationHistory.map(mapMessageToGeminiContent);
+
+    try {
+      const response = await ai.models.generateContent({
+        model: "gemini-2.5-flash",
+        contents,
+        config: {
+          systemInstruction: buildLandingPageSystemPrompt(currentHtml || undefined),
+          maxOutputTokens: 32768,
+        },
+      });
+
+      const text = response.text || "";
+      return parseLandingPageResponse(text);
+    } catch (error: any) {
+      console.error("generateLandingPage error:", error);
+      throw new HttpsError("internal", error.message || "Landing page generation failed.");
     }
   }
 );
