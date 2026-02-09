@@ -10,6 +10,7 @@ import {
   ArrowRight,
   Check,
   ChevronRight,
+  Play,
 } from 'lucide-react';
 import { TIER_LIMITS } from '../types';
 
@@ -112,16 +113,14 @@ export const MarketingLandingPage: React.FC = () => {
             </button>
           </div>
         </div>
-        {/* Decorative mockup */}
-        <div className="max-w-4xl mx-auto mt-16">
-          <div className="bg-gradient-to-br from-blue-50 to-purple-50 rounded-2xl border border-slate-200 p-8 shadow-sm">
-            <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6 h-64 flex items-center justify-center">
-              <div className="text-center text-slate-400">
-                <LayoutDashboard size={48} className="mx-auto mb-3 text-slate-300" />
-                <p className="text-sm font-medium">Campaign Canvas Workspace</p>
-                <p className="text-xs mt-1">Drag, connect, and refine your content visually</p>
-              </div>
-            </div>
+        {/* Hero screenshot */}
+        <div className="max-w-5xl mx-auto mt-16">
+          <div className="bg-gradient-to-br from-blue-50 to-purple-50 rounded-2xl border border-slate-200 p-3 sm:p-4 shadow-lg shadow-blue-500/10">
+            <img
+              src="/screenshots/canvas-workspace.png"
+              alt="MarketGen AI Canvas Workspace — drag, arrange, and connect marketing content visually"
+              className="w-full rounded-xl border border-slate-200 shadow-sm"
+            />
           </div>
         </div>
       </section>
@@ -149,21 +148,147 @@ export const MarketingLandingPage: React.FC = () => {
         </div>
       </section>
 
-      {/* How It Works */}
+      {/* See It In Action */}
       <section ref={howItWorksRef} className="py-20 px-6">
+        <div className="max-w-6xl mx-auto">
+          <div className="text-center mb-16">
+            <h2 className="text-3xl font-bold text-slate-900 mb-3">See it in action</h2>
+            <p className="text-sm text-slate-500 max-w-xl mx-auto">Watch how MarketGen AI streamlines your entire content creation workflow.</p>
+          </div>
+
+          {/* Row 1: AI Content Editing (video right) */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-10 items-center mb-20">
+            <div>
+              <div className="inline-flex items-center gap-2 px-3 py-1 bg-blue-50 rounded-full text-xs font-semibold text-blue-600 mb-4">
+                <Sparkles size={14} /> AI-Powered Editing
+              </div>
+              <h3 className="text-2xl font-bold text-slate-900 mb-3">Edit and refine content with AI</h3>
+              <p className="text-sm text-slate-500 leading-relaxed">
+                Select any content card and let AI rewrite, adjust tone, or expand your copy. Make changes instantly without leaving the canvas.
+              </p>
+            </div>
+            <div className="rounded-xl border border-slate-200 shadow-sm overflow-hidden bg-slate-50">
+              <video
+                src="/screenshots/ai-content-editing.mp4"
+                autoPlay
+                muted
+                loop
+                playsInline
+                className="w-full"
+              />
+            </div>
+          </div>
+
+          {/* Row 2: Compliance Analytics (image left) */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-10 items-center mb-20">
+            <div className="order-2 lg:order-1 rounded-xl border border-slate-200 shadow-sm overflow-hidden bg-slate-50">
+              <img
+                src="/screenshots/compliance-analytics.png"
+                alt="Compliance analytics dashboard with pass rates and scores"
+                className="w-full"
+              />
+            </div>
+            <div className="order-1 lg:order-2">
+              <div className="inline-flex items-center gap-2 px-3 py-1 bg-green-50 rounded-full text-xs font-semibold text-green-600 mb-4">
+                <ShieldCheck size={14} /> Compliance
+              </div>
+              <h3 className="text-2xl font-bold text-slate-900 mb-3">Built-in compliance analytics</h3>
+              <p className="text-sm text-slate-500 leading-relaxed">
+                Track compliance pass rates and scores across all campaigns. Every content piece is automatically checked against your regulatory rules.
+              </p>
+            </div>
+          </div>
+
+          {/* Row 3: Landing Page Generator (video right) */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-10 items-center mb-20">
+            <div>
+              <div className="inline-flex items-center gap-2 px-3 py-1 bg-purple-50 rounded-full text-xs font-semibold text-purple-600 mb-4">
+                <LayoutDashboard size={14} /> Landing Pages
+              </div>
+              <h3 className="text-2xl font-bold text-slate-900 mb-3">Generate full landing pages</h3>
+              <p className="text-sm text-slate-500 leading-relaxed">
+                Go beyond social posts — generate complete, responsive landing pages directly from your campaign brief and product catalog.
+              </p>
+            </div>
+            <div className="rounded-xl border border-slate-200 shadow-sm overflow-hidden bg-slate-50">
+              <video
+                src="/screenshots/landing-page-generator.mp4"
+                autoPlay
+                muted
+                loop
+                playsInline
+                className="w-full"
+              />
+            </div>
+          </div>
+
+          {/* Row 4: Shopify Integration (image left) */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-10 items-center mb-20">
+            <div className="order-2 lg:order-1 rounded-xl border border-slate-200 shadow-sm overflow-hidden bg-slate-50">
+              <img
+                src="/screenshots/shopify-integration.png"
+                alt="Product catalog with Shopify integration showing imported products"
+                className="w-full"
+              />
+            </div>
+            <div className="order-1 lg:order-2">
+              <div className="inline-flex items-center gap-2 px-3 py-1 bg-emerald-50 rounded-full text-xs font-semibold text-emerald-600 mb-4">
+                <Package size={14} /> Integrations
+              </div>
+              <h3 className="text-2xl font-bold text-slate-900 mb-3">Import products from Shopify</h3>
+              <p className="text-sm text-slate-500 leading-relaxed">
+                Connect your Shopify store and import products directly. Your product data powers accurate, on-brand marketing copy automatically.
+              </p>
+            </div>
+          </div>
+
+          {/* Row 5: Video Generation (video right) */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-10 items-center">
+            <div>
+              <div className="inline-flex items-center gap-2 px-3 py-1 bg-amber-50 rounded-full text-xs font-semibold text-amber-600 mb-4">
+                <Play size={14} /> Video
+              </div>
+              <h3 className="text-2xl font-bold text-slate-900 mb-3">Generate videos from storyboards</h3>
+              <p className="text-sm text-slate-500 leading-relaxed">
+                Create video storyboards and generate real video clips using Google Veo. Go from concept to video content in minutes.
+              </p>
+            </div>
+            <div className="rounded-xl border border-slate-200 shadow-sm overflow-hidden bg-slate-50">
+              <video
+                src="/screenshots/video-generation.mp4"
+                autoPlay
+                muted
+                loop
+                playsInline
+                className="w-full"
+              />
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* How It Works */}
+      <section className="py-20 px-6 bg-white">
         <div className="max-w-4xl mx-auto">
           <div className="text-center mb-14">
             <h2 className="text-3xl font-bold text-slate-900 mb-3">How it works</h2>
             <p className="text-sm text-slate-500">Three simple steps from brief to published content.</p>
           </div>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-            {STEPS.map(s => (
+            {STEPS.map((s, i) => (
               <div key={s.number} className="text-center">
                 <div className="w-12 h-12 bg-gradient-to-br from-blue-600 to-purple-600 rounded-full flex items-center justify-center mx-auto mb-5 text-white font-bold text-lg">
                   {s.number}
                 </div>
                 <h3 className="text-base font-semibold text-slate-900 mb-2">{s.title}</h3>
-                <p className="text-sm text-slate-500 leading-relaxed">{s.description}</p>
+                <p className="text-sm text-slate-500 leading-relaxed mb-4">{s.description}</p>
+                {i === 2 && (
+                  <img
+                    src="/screenshots/manual-content.png"
+                    alt="Adding content cards to the canvas manually"
+                    className="rounded-lg border border-slate-200 shadow-sm mt-2"
+                  />
+                )}
               </div>
             ))}
           </div>
