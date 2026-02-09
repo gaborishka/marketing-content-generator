@@ -1096,6 +1096,7 @@ export const CampaignDetail: React.FC<CampaignDetailProps> = ({
           content={activeEditingContent}
           onClose={() => setEditingContentId(null)}
           onUpdate={onUpdateItem}
+          onRefreshUsage={onRefreshUsage}
         />
       )}
 

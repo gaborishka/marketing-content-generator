@@ -20,12 +20,14 @@ interface VideoStoryboardModalProps {
   content: GeneratedContent;
   onClose: () => void;
   onUpdate: (updatedContent: GeneratedContent) => void;
+  onRefreshUsage?: () => void;
 }
 
-export const VideoStoryboardModal: React.FC<VideoStoryboardModalProps> = ({ 
-  content, 
-  onClose, 
-  onUpdate 
+export const VideoStoryboardModal: React.FC<VideoStoryboardModalProps> = ({
+  content,
+  onClose,
+  onUpdate,
+  onRefreshUsage
 }) => {
   const [isGeneratingVideo, setIsGeneratingVideo] = useState(false);
   const [activeTab, setActiveTab] = useState<'video' | 'slideshow'>('video');
@@ -50,11 +52,12 @@ export const VideoStoryboardModal: React.FC<VideoStoryboardModalProps> = ({
 
     try {
       const videoUrl = await generateVideoFromStoryboard(content.storyboard, content.id);
-      onUpdate({ 
-        ...content, 
-        videoUrl, 
-        videoStatus: 'completed' 
+      onUpdate({
+        ...content,
+        videoUrl,
+        videoStatus: 'completed'
       });
+      onRefreshUsage?.();
     } catch (error: any) {
       console.error("Video gen failed", error);
       onUpdate({ ...content, videoStatus: 'failed' });

@@ -424,12 +424,11 @@ export const generateCampaignContent = onCall(
       throw new HttpsError("invalid-argument", "campaignId is required.");
     }
 
-    await enforceQuotaAndIncrement(userId, email, displayName);
-
     const jobId = `job-${randomUUID()}`;
 
     try {
-      // Atomically check for active jobs and create in a single transaction
+      // Create job first — if one is already active, we reject without
+      // consuming a quota unit.
       await createJobIfNoActive(jobId, {
         userId,
         campaignId,
@@ -441,8 +440,6 @@ export const generateCampaignContent = onCall(
         itemsTotal: 0,
         retryCount: 0,
       });
-
-      return { jobId };
     } catch (error: any) {
       if (error.message === "ACTIVE_JOB_EXISTS") {
         throw new HttpsError("already-exists", "A generation job is already running for this campaign.");
@@ -450,6 +447,11 @@ export const generateCampaignContent = onCall(
       console.error("generateCampaignContent error:", error);
       throw new HttpsError("internal", error.message || "Failed to create generation job.");
     }
+
+    // Only consume quota after confirming no active job exists.
+    await enforceQuotaAndIncrement(userId, email, displayName);
+
+    return { jobId };
   }
 );
 

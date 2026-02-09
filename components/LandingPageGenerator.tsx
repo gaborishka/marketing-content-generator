@@ -10,6 +10,7 @@ interface LandingPageGeneratorProps {
   landingPages: LandingPageProject[];
   onSave: (project: LandingPageProject) => void;
   onDelete: (id: string) => void;
+  onRefreshUsage?: () => void;
 }
 
 type Phase = 'initial' | 'loading-interview' | 'interview' | 'chat';
@@ -23,7 +24,7 @@ const createNewProject = (): LandingPageProject => ({
   updatedAt: Date.now(),
 });
 
-export const LandingPageGenerator: React.FC<LandingPageGeneratorProps> = ({ landingPages, onSave, onDelete }) => {
+export const LandingPageGenerator: React.FC<LandingPageGeneratorProps> = ({ landingPages, onSave, onDelete, onRefreshUsage }) => {
   const [activeProject, setActiveProject] = useState<LandingPageProject>(() => {
     return landingPages[0] || createNewProject();
   });
@@ -95,6 +96,7 @@ export const LandingPageGenerator: React.FC<LandingPageGeneratorProps> = ({ land
         setPhase('chat');
         saveProject(allMessages, response.html, text);
       }
+      onRefreshUsage?.();
     } catch (error: any) {
       console.error('Interview fetch error:', error);
       const isQuotaError = error?.code === 'functions/resource-exhausted';
@@ -140,6 +142,7 @@ export const LandingPageGenerator: React.FC<LandingPageGeneratorProps> = ({ land
 
       if (response.html) setCurrentHtml(response.html);
       saveProject(allMessages, response.html, initialDescription);
+      onRefreshUsage?.();
     } catch (error: any) {
       console.error('Generation error:', error);
       const isQuotaError = error?.code === 'functions/resource-exhausted';
@@ -177,6 +180,7 @@ export const LandingPageGenerator: React.FC<LandingPageGeneratorProps> = ({ land
       if (response.html) setCurrentHtml(response.html);
 
       saveProject(allMessages, newHtml, undefined);
+      onRefreshUsage?.();
     } catch (error: any) {
       console.error('Refinement error:', error);
       const isQuotaError = error?.code === 'functions/resource-exhausted';

@@ -557,6 +557,7 @@ function App() {
                 landingPages={landingPages}
                 onSave={handleLandingPageSave}
                 onDelete={handleLandingPageDelete}
+                onRefreshUsage={refreshUsage}
               />
             }
           />
