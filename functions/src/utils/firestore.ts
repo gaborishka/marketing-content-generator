@@ -50,6 +50,14 @@ export async function getContentForCampaign(
   return snap.docs.map((d) => ({ id: d.id, ...d.data() } as ContentDoc));
 }
 
+export async function getCampaignsForUser(userId: string): Promise<CampaignDoc[]> {
+  const snap = await db()
+    .collection("campaigns")
+    .where("userId", "==", userId)
+    .get();
+  return snap.docs.map((d) => ({ id: d.id, ...d.data() } as CampaignDoc));
+}
+
 const ACTIVE_STATUSES = ["pending", "planning", "generating", "compliance_check", "retrying", "generating_images"];
 
 /**

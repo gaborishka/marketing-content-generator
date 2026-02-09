@@ -11,7 +11,8 @@ import {
   Bell,
   User,
   LogOut,
-  Sparkles
+  Sparkles,
+  BarChart3
 } from 'lucide-react';
 import { Link, useLocation } from 'react-router-dom';
 
@@ -83,12 +84,25 @@ export const Layout: React.FC<LayoutProps> = ({ children, onSignOut, userName, u
             path="/brands"
             active={location.pathname.startsWith('/brands')}
           />
-          <SidebarItem
-            icon={ShieldCheck}
-            label="Compliance Rules"
-            path="/compliance-rules"
-            active={location.pathname.startsWith('/compliance-rules')}
-          />
+          <div>
+            <SidebarItem
+              icon={ShieldCheck}
+              label="Compliance Rules"
+              path="/compliance-rules"
+              active={location.pathname.startsWith('/compliance-rules') && location.pathname !== '/compliance-analytics'}
+            />
+            <Link
+              to="/compliance-analytics"
+              className={`flex items-center space-x-3 px-4 py-2 rounded-lg transition-colors mb-1 ml-8 ${
+                location.pathname === '/compliance-analytics'
+                  ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/30'
+                  : 'text-slate-400 hover:bg-slate-800 hover:text-white'
+              }`}
+            >
+              <BarChart3 size={16} />
+              <span className="font-medium text-sm">Compliance Dashboard</span>
+            </Link>
+          </div>
           <SidebarItem
             icon={Globe}
             label="Landing Pages"
