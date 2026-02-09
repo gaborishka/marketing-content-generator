@@ -16,6 +16,7 @@ import * as storage from './services/storageService';
 import { uploadContentImages, isBase64DataUrl } from './services/fileStorage';
 import { AuthScreen } from './components/AuthScreen';
 import { onAuthChange, logOut } from './services/authService';
+import { getShopifyStatus, ShopifyStatus } from './services/shopifyService';
 import type { User } from 'firebase/auth';
 
 // Seed Data
@@ -31,7 +32,8 @@ const MOCK_PRODUCTS: Product[] = [
     features: ['12-hour relief', 'Non-drowsy', 'Easy-swallow coating'],
     imageUrl: 'https://images.unsplash.com/photo-1584308666744-24d5c474f2ae?auto=format&fit=crop&q=80&w=400',
     complianceFiles: ['fda-approval.pdf'],
-    marketingTags: ['pain relief', 'seniors', 'active lifestyle']
+    marketingTags: ['pain relief', 'seniors', 'active lifestyle'],
+    source: 'internal'
   },
   {
     id: 'prod-2',
@@ -44,7 +46,8 @@ const MOCK_PRODUCTS: Product[] = [
     features: ['Vitamin C + E', 'Cruelty-free', 'Dermatologist tested'],
     imageUrl: 'https://images.unsplash.com/photo-1620916566398-39f1143ab7be?auto=format&fit=crop&q=80&w=400',
     complianceFiles: [],
-    marketingTags: ['beauty', 'skincare', 'organic']
+    marketingTags: ['beauty', 'skincare', 'organic'],
+    source: 'internal'
   },
   {
     id: 'prod-3',
@@ -57,7 +60,8 @@ const MOCK_PRODUCTS: Product[] = [
     features: ['Caffeine-free', 'Natural ingredients', 'Clinically studied'],
     imageUrl: 'https://images.unsplash.com/photo-1550572017-edd951aa8f72?auto=format&fit=crop&q=80&w=400',
     complianceFiles: ['supplement-facts.pdf'],
-    marketingTags: ['focus', 'students', 'professionals']
+    marketingTags: ['focus', 'students', 'professionals'],
+    source: 'internal'
   }
 ];
 
@@ -157,6 +161,7 @@ function App() {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [isLoadingData, setIsLoadingData] = useState(true);
+  const [shopifyStatus, setShopifyStatus] = useState<ShopifyStatus>({ connected: false });
 
   // Listen for auth state changes
   useEffect(() => {
@@ -165,6 +170,15 @@ function App() {
       setAuthLoading(false);
     });
     return unsubscribe;
+  }, []);
+
+  const refreshShopifyStatus = useCallback(async () => {
+    try {
+      const status = await getShopifyStatus();
+      setShopifyStatus(status);
+    } catch {
+      // Shopify status fetch failed — non-critical
+    }
   }, []);
 
   // Load Data from Firestore on Mount (only when authenticated)
@@ -184,17 +198,27 @@ function App() {
           storage.getAll<LandingPageProject>('landingPages')
         ]);
 
+        // Scope seed IDs to current user to avoid cross-user document collisions
+        const prefix = currentUser!.uid.substring(0, 8);
+        const scopeId = (id: string) => `${prefix}_${id}`;
+
         if (dbProducts.length === 0) {
-          // Seed DB with mock data if empty
-          await Promise.all(MOCK_PRODUCTS.map(p => storage.put('products', p)));
-          setProducts(MOCK_PRODUCTS);
+          const seeded = MOCK_PRODUCTS.map(p => ({ ...p, id: scopeId(p.id) }));
+          await Promise.all(seeded.map(p => storage.put('products', p)));
+          setProducts(seeded);
         } else {
           setProducts(dbProducts);
         }
 
         if (dbCampaigns.length === 0) {
-          await Promise.all(MOCK_CAMPAIGNS.map(c => storage.put('campaigns', c)));
-          setCampaigns(MOCK_CAMPAIGNS);
+          const seeded = MOCK_CAMPAIGNS.map(c => ({
+            ...c,
+            id: scopeId(c.id),
+            primaryProductId: c.primaryProductId ? scopeId(c.primaryProductId) : undefined,
+            secondaryProductIds: c.secondaryProductIds?.map(scopeId) || [],
+          }));
+          await Promise.all(seeded.map(c => storage.put('campaigns', c)));
+          setCampaigns(seeded);
         } else {
           setCampaigns(dbCampaigns);
         }
@@ -204,8 +228,14 @@ function App() {
         setLandingPages(dbLandingPages);
 
         if (dbContent.length === 0) {
-          await Promise.all(INITIAL_CONTENT.map(c => storage.put('content', c)));
-          setContentStore(INITIAL_CONTENT);
+          const seeded = INITIAL_CONTENT.map(c => ({
+            ...c,
+            id: scopeId(c.id),
+            campaignId: scopeId(c.campaignId),
+            connections: c.connections?.map(scopeId),
+          }));
+          await Promise.all(seeded.map(c => storage.put('content', c)));
+          setContentStore(seeded);
         } else {
           setContentStore(dbContent.filter(c => c.status !== 'generating'));
         }
@@ -223,7 +253,8 @@ function App() {
       }
     };
     loadData();
-  }, [currentUser]);
+    refreshShopifyStatus();
+  }, [currentUser, refreshShopifyStatus]);
 
   const handleComplianceRuleCreate = (rule: ComplianceRule) => {
     setComplianceRules(prev => [rule, ...prev]);
@@ -248,6 +279,15 @@ function App() {
       return c;
     }));
   };
+
+  const refreshProducts = useCallback(async () => {
+    try {
+      const dbProducts = await storage.getAll<Product>('products');
+      setProducts(dbProducts.length > 0 ? dbProducts : MOCK_PRODUCTS);
+    } catch {
+      // Non-critical
+    }
+  }, []);
 
   const handleProductCreate = (product: Product) => {
     setProducts(prev => [product, ...prev]);
@@ -465,6 +505,9 @@ function App() {
               onCreate={handleProductCreate}
               onUpdate={handleProductUpdate}
               onDelete={handleProductDelete}
+              shopifyStatus={shopifyStatus}
+              onShopifyStatusChange={refreshShopifyStatus}
+              onProductsImported={refreshProducts}
             />
           } />
           <Route

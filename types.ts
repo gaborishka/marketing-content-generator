@@ -3,6 +3,8 @@
 export type UserRole = 'admin' | 'marketer' | 'reviewer';
 
 // Products
+export type ProductSource = 'internal' | 'shopify';
+
 export interface Product {
   id: string;
   name: string;
@@ -15,6 +17,10 @@ export interface Product {
   imageUrl: string;
   complianceFiles: string[];
   marketingTags: string[];
+  source: ProductSource;
+  shopifyProductId?: string;
+  shopifyHandle?: string;
+  lastSyncedAt?: string;
 }
 
 // Compliance Rules

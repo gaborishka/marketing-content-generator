@@ -7,6 +7,7 @@ import {
   ComplianceRuleDoc,
   ContentDoc,
   JobStatus,
+  ShopifyConnectionDoc,
 } from "../types/pipeline";
 
 const db = () => getFirestore();
@@ -162,4 +163,44 @@ export async function updateJobDoc(
       ...fields,
       updatedAt: FieldValue.serverTimestamp(),
     });
+}
+
+// ── Shopify helpers ─────────────────────────────────────────────────────
+
+export async function getShopifyConnection(
+  userId: string
+): Promise<ShopifyConnectionDoc | null> {
+  const doc = await db().collection("shopifyConnections").doc(userId).get();
+  if (!doc.exists) return null;
+  return doc.data() as ShopifyConnectionDoc;
+}
+
+export async function setShopifyConnection(
+  userId: string,
+  data: ShopifyConnectionDoc
+): Promise<void> {
+  await db().collection("shopifyConnections").doc(userId).set(data);
+}
+
+export async function deleteShopifyConnection(userId: string): Promise<void> {
+  await db().collection("shopifyConnections").doc(userId).delete();
+}
+
+export async function getShopifyProducts(
+  userId: string
+): Promise<ProductDoc[]> {
+  const snap = await db()
+    .collection("products")
+    .where("userId", "==", userId)
+    .where("source", "==", "shopify")
+    .get();
+  return snap.docs.map((d) => ({ id: d.id, ...d.data() } as ProductDoc));
+}
+
+export async function setProductDoc(product: ProductDoc): Promise<void> {
+  await db().collection("products").doc(product.id).set(product);
+}
+
+export async function deleteProductDoc(productId: string): Promise<void> {
+  await db().collection("products").doc(productId).delete();
 }

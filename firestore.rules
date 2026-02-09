@@ -37,6 +37,13 @@ service cloud.firestore {
                     && request.resource.data.userId == request.auth.uid;
       allow delete: if request.auth != null && resource.data.userId == request.auth.uid;
     }
+    match /brands/{id} {
+      allow read: if request.auth != null && resource.data.userId == request.auth.uid;
+      allow create: if request.auth != null && request.resource.data.userId == request.auth.uid;
+      allow update: if request.auth != null && resource.data.userId == request.auth.uid
+                    && request.resource.data.userId == request.auth.uid;
+      allow delete: if request.auth != null && resource.data.userId == request.auth.uid;
+    }
     // Generation jobs: read-only for authenticated owner, created by Cloud Functions only
     match /generationJobs/{id} {
       allow read: if request.auth != null && resource.data.userId == request.auth.uid;
@@ -44,6 +51,14 @@ service cloud.firestore {
     }
     // Job locks: server-side only, no client access
     match /generationJobLocks/{id} {
+      allow read, write: if false;
+    }
+    // Shopify connections: server-side only, no client access
+    match /shopifyConnections/{userId} {
+      allow read, write: if false;
+    }
+    // Shopify OAuth state tokens: server-side only, no client access
+    match /shopifyOAuthStates/{stateId} {
       allow read, write: if false;
     }
     match /{document=**} { allow read, write: if false; }
