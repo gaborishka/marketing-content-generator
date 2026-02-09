@@ -793,7 +793,7 @@ export const analyzeCampaignsCompliance = onCall(
 // ── getUserProfileAndUsage ────────────────────────────────────────────────
 
 export const getUserProfileAndUsage = onCall(
-  { timeoutSeconds: 10, memory: "256MiB", cors: true },
+  { timeoutSeconds: 10, memory: "256MiB", secrets: [STRIPE_SECRET_KEY], cors: true },
   async (request) => {
     if (!request.auth) {
       throw new HttpsError("unauthenticated", "Authentication required.");
@@ -803,7 +803,33 @@ export const getUserProfileAndUsage = onCall(
     const email = request.auth.token.email || "";
     const displayName = request.auth.token.name || "";
 
-    const profile = await getOrCreateUserProfile(uid, email, displayName);
+    let profile = await getOrCreateUserProfile(uid, email, displayName);
+
+    // Self-healing: if Firestore says "free" but Stripe has an active
+    // subscription (e.g. webhook was delayed or failed), fix it now.
+    if (profile.tier === "free" && profile.stripeCustomerId) {
+      try {
+        const stripe = new Stripe(STRIPE_SECRET_KEY.value());
+        const activeSubs = await stripe.subscriptions.list({
+          customer: profile.stripeCustomerId,
+          status: "active",
+          limit: 1,
+        });
+        if (activeSubs.data.length > 0) {
+          const sub = activeSubs.data[0];
+          await updateUserProfile(uid, {
+            tier: "pro" as UserTier,
+            stripeSubscriptionId: sub.id,
+            stripeSubscriptionStatus: "active",
+          });
+          profile = { ...profile, tier: "pro" as UserTier, stripeSubscriptionId: sub.id, stripeSubscriptionStatus: "active" };
+        }
+      } catch (err) {
+        // Non-fatal: if Stripe call fails, return stale data rather than error
+        console.error("Self-healing Stripe sync failed:", err);
+      }
+    }
+
     const usage = await getDailyUsage(uid);
 
     return {
@@ -878,6 +904,19 @@ export const createCheckoutSession = onCall(
     }
 
     const stripe = getStripe();
+
+    // Stripe-level duplicate check: catches the window between checkout
+    // completion and webhook processing where Firestore still says "free"
+    if (profile.stripeCustomerId) {
+      const activeSubs = await stripe.subscriptions.list({
+        customer: profile.stripeCustomerId,
+        status: "active",
+        limit: 1,
+      });
+      if (activeSubs.data.length > 0) {
+        throw new HttpsError("already-exists", "You already have an active subscription. It may take a moment to reflect in the app.");
+      }
+    }
 
     // Reuse existing Stripe customer or create a new one.
     // Stripe customer creation is done OUTSIDE the transaction to avoid

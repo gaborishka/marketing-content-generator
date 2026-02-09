@@ -31,18 +31,46 @@ export const Settings: React.FC<SettingsProps> = ({ usageInfo, onRefreshUsage })
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'info' } | null>(null);
   const [checkoutLoading, setCheckoutLoading] = useState(false);
   const [portalLoading, setPortalLoading] = useState(false);
+  const [activating, setActivating] = useState(false);
 
   const billing = searchParams.get('billing');
   useEffect(() => {
     if (billing === 'success') {
-      setToast({ message: 'Subscription activated! Welcome to Pro.', type: 'success' });
-      onRefreshUsage();
+      setActivating(true);
       setSearchParams((prev) => { prev.delete('billing'); return prev; }, { replace: true });
+
+      let elapsed = 0;
+      const POLL_INTERVAL = 2000;
+      const MAX_WAIT = 15000;
+
+      // Kick off first refresh immediately
+      onRefreshUsage();
+
+      const timer = setInterval(() => {
+        elapsed += POLL_INTERVAL;
+        if (elapsed >= MAX_WAIT) {
+          clearInterval(timer);
+          setActivating(false);
+          setToast({ message: 'Taking longer than expected — please refresh in a moment.', type: 'info' });
+          return;
+        }
+        onRefreshUsage();
+      }, POLL_INTERVAL);
+
+      return () => clearInterval(timer);
     } else if (billing === 'canceled') {
       setToast({ message: 'Checkout canceled. No changes were made.', type: 'info' });
       setSearchParams((prev) => { prev.delete('billing'); return prev; }, { replace: true });
     }
   }, [billing, setSearchParams, onRefreshUsage]);
+
+  // Stop polling once tier becomes pro
+  useEffect(() => {
+    if (activating && usageInfo?.tier === 'pro') {
+      setActivating(false);
+      setToast({ message: 'Subscription activated! Welcome to Pro.', type: 'success' });
+    }
+  }, [activating, usageInfo?.tier]);
 
   useEffect(() => {
     if (toast) {
@@ -89,6 +117,13 @@ export const Settings: React.FC<SettingsProps> = ({ usageInfo, onRefreshUsage })
         }`}>
           {toast.type === 'success' ? <Check size={16} className="mr-2 shrink-0" /> : <Zap size={16} className="mr-2 shrink-0" />}
           {toast.message}
+        </div>
+      )}
+
+      {activating && (
+        <div className="mb-6 p-4 rounded-lg border bg-blue-50 border-blue-200 text-blue-800 text-sm flex items-center">
+          <Loader2 size={16} className="animate-spin mr-2 shrink-0" />
+          Activating your subscription...
         </div>
       )}
 
