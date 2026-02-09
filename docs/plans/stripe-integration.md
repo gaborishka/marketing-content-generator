@@ -113,18 +113,18 @@ MarketGen AI needs tiered user management with usage limits. Currently: Firebase
 
 ### Phase 7: Stripe CLI Setup & Products
 
-- [ ] **7.1 Install Stripe CLI** (if not installed) — `brew install stripe/stripe-cli/stripe`
+- [x] **7.1 Install Stripe CLI** (if not installed) — `brew install stripe/stripe-cli/stripe`
 
-- [ ] **7.2 Create Stripe products and prices**
+- [x] **7.2 Create Stripe products and prices**
   - Product: "MarketGen AI Pro"
   - Monthly price: $29/month
   - Yearly price: $290/year (~17% savings)
 
-- [ ] **7.3 Set Firebase secrets**
+- [x] **7.3 Set Firebase secrets**
   - `firebase functions:secrets:set STRIPE_SECRET_KEY`
   - `firebase functions:secrets:set STRIPE_WEBHOOK_SECRET`
 
-- [ ] **7.4 Configure local webhook forwarding**
+- [x] **7.4 Configure local webhook forwarding**
   - `stripe listen --forward-to http://127.0.0.1:5001/{PROJECT}/us-central1/stripeWebhook`
 
 ### Phase 8: Tests
