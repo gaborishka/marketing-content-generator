@@ -610,7 +610,14 @@ function App() {
     <Router>
       <Layout onSignOut={logOut} userName={currentUser.displayName || currentUser.email || 'User'} usageInfo={usageInfo}>
         <Routes>
-          <Route path="/" element={<Dashboard />} />
+          <Route path="/" element={
+            <Dashboard
+              campaigns={campaigns}
+              contentStore={contentStore}
+              products={products}
+              usageInfo={usageInfo}
+            />
+          } />
           <Route path="/campaigns" element={<CampaignList campaigns={campaigns} />} />
           <Route 
             path="/campaigns/new" 
