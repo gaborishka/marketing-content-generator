@@ -5,9 +5,9 @@ import { GoogleGenAI, Type } from "@google/genai";
 
 // Get API key from environment variable
 const getApiKey = (): string => {
-  const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
+  const apiKey = import.meta.env.GEMINI_API_KEY;
   if (!apiKey) {
-    throw new Error("VITE_GEMINI_API_KEY environment variable is required. Add it to your .env.local file.");
+    throw new Error("GEMINI_API_KEY environment variable is required. Add it to your .env.local file.");
   }
   return apiKey;
 };
