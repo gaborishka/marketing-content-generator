@@ -129,13 +129,8 @@ describe("enforceQuota", () => {
     });
 
     await expect(enforceQuota("user-1", "a@b.com", "Test")).rejects.toThrow(
-      "Daily generation limit reached (100/100)."
+      /^Daily generation limit reached \(100\/100\)\.$/
     );
-    try {
-      await enforceQuota("user-1", "a@b.com", "Test");
-    } catch (e: any) {
-      expect(e.message).not.toContain("Upgrade");
-    }
   });
 
   it("allows pro user with high usage under limit", async () => {

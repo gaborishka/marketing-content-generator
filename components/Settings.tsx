@@ -44,7 +44,7 @@ export const Settings: React.FC<SettingsProps> = ({ usageInfo, onRefreshUsage })
       searchParams.delete('billing');
       setSearchParams(searchParams, { replace: true });
     }
-  }, []);
+  }, [searchParams, setSearchParams, onRefreshUsage]);
 
   useEffect(() => {
     if (toast) {
@@ -74,7 +74,9 @@ export const Settings: React.FC<SettingsProps> = ({ usageInfo, onRefreshUsage })
   };
 
   const isPro = usageInfo?.tier === 'pro';
-  const usagePercent = usageInfo ? Math.min(100, (usageInfo.generationCount / usageInfo.limit) * 100) : 0;
+  const usagePercent = usageInfo && usageInfo.limit > 0
+    ? Math.min(100, (usageInfo.generationCount / usageInfo.limit) * 100)
+    : 0;
 
   return (
     <div>

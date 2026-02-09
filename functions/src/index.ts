@@ -571,15 +571,19 @@ export const createCheckoutSession = onCall(
     }
 
     // Determine which price to use (default: monthly)
-    const { interval } = (request.data || {}) as { interval?: "monthly" | "yearly" };
+    const { interval, returnUrl } = (request.data || {}) as {
+      interval?: "monthly" | "yearly";
+      returnUrl?: string;
+    };
     const priceId = interval === "yearly" ? STRIPE_PRICE_YEARLY : STRIPE_PRICE_MONTHLY;
+    const baseReturnUrl = returnUrl || "https://localhost:3000/#/settings";
 
     const session = await stripe.checkout.sessions.create({
       customer: customerId,
       mode: "subscription",
       line_items: [{ price: priceId, quantity: 1 }],
-      success_url: "{CHECKOUT_SESSION_URL}?billing=success",
-      cancel_url: "{CHECKOUT_SESSION_URL}?billing=canceled",
+      success_url: `${baseReturnUrl}?billing=success`,
+      cancel_url: `${baseReturnUrl}?billing=canceled`,
       metadata: { firebaseUid: uid },
     });
 
@@ -603,10 +607,13 @@ export const createPortalSession = onCall(
       throw new HttpsError("failed-precondition", "No billing account found. Please subscribe first.");
     }
 
+    const { returnUrl } = (request.data || {}) as { returnUrl?: string };
+    const baseReturnUrl = returnUrl || "https://localhost:3000/#/settings";
+
     const stripe = getStripe();
     const session = await stripe.billingPortal.sessions.create({
       customer: profile.stripeCustomerId,
-      return_url: "{CHECKOUT_SESSION_URL}",
+      return_url: baseReturnUrl,
     });
 
     return { url: session.url };
@@ -635,7 +642,7 @@ export const stripeWebhook = onRequest(
       );
     } catch (err: any) {
       console.error("Webhook signature verification failed:", err.message);
-      res.status(400).send(`Webhook Error: ${err.message}`);
+      res.status(400).send("Webhook signature verification failed.");
       return;
     }
 
@@ -679,7 +686,7 @@ export const stripeWebhook = onRequest(
 
           if (uid) {
             const status = subscription.status;
-            const tier: UserTier = status === "active" ? "pro" : "free";
+            const tier: UserTier = (status === "active" || status === "trialing") ? "pro" : "free";
             await updateUserProfile(uid, {
               tier,
               stripeSubscriptionId: subscription.id,
@@ -695,10 +702,13 @@ export const stripeWebhook = onRequest(
           const uid = await findUidByCustomerId(customerId);
 
           if (uid) {
-            await updateUserProfile(uid, {
+            // Use direct Firestore update to leverage FieldValue.delete()
+            const userRef = getFirestore().collection("users").doc(uid);
+            await userRef.update({
               tier: "free" as UserTier,
-              stripeSubscriptionId: undefined,
+              stripeSubscriptionId: FieldValue.delete(),
               stripeSubscriptionStatus: "canceled",
+              updatedAt: FieldValue.serverTimestamp(),
             });
           }
           break;
