@@ -9,6 +9,13 @@ import { join } from "path";
 import { readFile, unlink } from "fs/promises";
 import { tmpdir } from "os";
 import { GEMINI_API_KEY } from "./utils/gemini";
+import {
+  getOrCreateUserProfile,
+  checkQuota,
+  incrementUsage,
+  getDailyUsage,
+} from "./utils/billing";
+import { TIER_LIMITS } from "./types/pipeline";
 import { buildLandingPageSystemPrompt, parseLandingPageResponse, mapMessageToGeminiContent } from "./prompts/landingPage.prompt";
 import {
   SHOPIFY_CLIENT_ID,
@@ -67,6 +74,20 @@ interface GenerateVideoInput {
 
 const getAiClient = () => new GoogleGenAI({ apiKey: GEMINI_API_KEY.value() });
 
+// ── Quota enforcement helper ─────────────────────────────────────────────────
+
+async function enforceQuota(uid: string, email: string, displayName: string): Promise<void> {
+  await getOrCreateUserProfile(uid, email, displayName);
+  const quota = await checkQuota(uid);
+  if (!quota.allowed) {
+    const message =
+      quota.tier === "free"
+        ? `Daily generation limit reached (${quota.current}/${quota.limit}). Upgrade to Pro for ${TIER_LIMITS.pro} generations/day.`
+        : `Daily generation limit reached (${quota.current}/${quota.limit}).`;
+    throw new HttpsError("resource-exhausted", message);
+  }
+}
+
 // ── generateContent ──────────────────────────────────────────────────────────
 
 export const generateContent = onCall(
@@ -75,6 +96,13 @@ export const generateContent = onCall(
     if (!request.auth) {
       throw new HttpsError("unauthenticated", "Authentication required.");
     }
+
+    const uid = request.auth.uid;
+    const email = request.auth.token.email || "";
+    const displayName = request.auth.token.name || "";
+
+    await enforceQuota(uid, email, displayName);
+    await incrementUsage(uid);
 
     const { prompt, responseSchema } = request.data as GenerateContentInput;
     if (!prompt) {
@@ -110,6 +138,13 @@ export const generateImage = onCall(
     if (!request.auth) {
       throw new HttpsError("unauthenticated", "Authentication required.");
     }
+
+    const uid = request.auth.uid;
+    const email = request.auth.token.email || "";
+    const displayName = request.auth.token.name || "";
+
+    await enforceQuota(uid, email, displayName);
+    await incrementUsage(uid);
 
     const { prompt, aspectRatio } = request.data as GenerateImageInput;
     if (!prompt) {
@@ -215,6 +250,13 @@ export const generateVideo = onCall(
       throw new HttpsError("unauthenticated", "Authentication required.");
     }
 
+    const uid = request.auth!.uid;
+    const email = request.auth!.token.email || "";
+    const displayName = request.auth!.token.name || "";
+
+    await enforceQuota(uid, email, displayName);
+    await incrementUsage(uid);
+
     const { referenceImages, prompt, contentId } = request.data as GenerateVideoInput;
     if (!referenceImages || referenceImages.length === 0) {
       throw new HttpsError("invalid-argument", "referenceImages is required.");
@@ -317,6 +359,13 @@ export const generateLandingPage = onCall(
       throw new HttpsError("unauthenticated", "Authentication required.");
     }
 
+    const uid = request.auth.uid;
+    const email = request.auth.token.email || "";
+    const displayName = request.auth.token.name || "";
+
+    await enforceQuota(uid, email, displayName);
+    await incrementUsage(uid);
+
     const { conversationHistory, currentHtml } = request.data as GenerateLandingPageInput;
     if (!conversationHistory || conversationHistory.length === 0) {
       throw new HttpsError("invalid-argument", "conversationHistory is required.");
@@ -363,13 +412,19 @@ export const generateCampaignContent = onCall(
       throw new HttpsError("unauthenticated", "Authentication required.");
     }
 
+    const userId = request.auth.uid;
+    const email = request.auth.token.email || "";
+    const displayName = request.auth.token.name || "";
+
+    await enforceQuota(userId, email, displayName);
+    await incrementUsage(userId);
+
     const { campaignId } = request.data as GenerateCampaignInput;
     if (!campaignId || typeof campaignId !== "string") {
       throw new HttpsError("invalid-argument", "campaignId is required.");
     }
 
     const jobId = `job-${randomUUID()}`;
-    const userId = request.auth.uid;
 
     try {
       // Atomically check for active jobs and create in a single transaction
@@ -446,6 +501,31 @@ export const processGenerationJob = onDocumentCreated(
       }
       // Note: clearJobLock is handled by the orchestrator's finally block
     }
+  }
+);
+
+// ── getUserProfileAndUsage ────────────────────────────────────────────────
+
+export const getUserProfileAndUsage = onCall(
+  { timeoutSeconds: 10, memory: "256MiB", cors: true },
+  async (request) => {
+    if (!request.auth) {
+      throw new HttpsError("unauthenticated", "Authentication required.");
+    }
+
+    const uid = request.auth.uid;
+    const email = request.auth.token.email || "";
+    const displayName = request.auth.token.name || "";
+
+    const profile = await getOrCreateUserProfile(uid, email, displayName);
+    const usage = await getDailyUsage(uid);
+
+    return {
+      tier: profile.tier,
+      stripeSubscriptionStatus: profile.stripeSubscriptionStatus || null,
+      generationCount: usage?.generationCount ?? 0,
+      limit: TIER_LIMITS[profile.tier],
+    };
   }
 );
 

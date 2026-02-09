@@ -32,11 +32,11 @@ MarketGen AI needs tiered user management with usage limits. Currently: Firebase
 
 ### Phase 2: Quota Enforcement in Cloud Functions
 
-- [ ] **2.1 Add `enforceQuota` helper to `functions/src/index.ts`**
+- [x] **2.1 Add `enforceQuota` helper to `functions/src/index.ts`**
   - Calls `getOrCreateUserProfile` (lazy user doc creation) then `checkQuota`
   - Throws `HttpsError("resource-exhausted", ...)` with upgrade message for free users
 
-- [ ] **2.2 Add quota guard to all 5 generation functions**
+- [x] **2.2 Add quota guard to all 5 generation functions**
   - `generateCampaignContent` — add `enforceQuota` + `incrementUsage` after auth check
   - `generateContent` — same
   - `generateImage` — same
@@ -44,7 +44,7 @@ MarketGen AI needs tiered user management with usage limits. Currently: Firebase
   - `generateLandingPage` — same
   - Each call = 1 count (increment before work starts to prevent race conditions)
 
-- [ ] **2.3 Add `getUserProfileAndUsage` Cloud Function** (onCall, 10s)
+- [x] **2.3 Add `getUserProfileAndUsage` Cloud Function** (onCall, 10s)
   - Returns `{ tier, stripeSubscriptionStatus, generationCount, limit }`
   - Called by frontend on auth to display tier/usage in sidebar
 
