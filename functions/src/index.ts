@@ -405,7 +405,6 @@ export const generateLandingPage = onCall(
 import { createJobIfNoActive, updateJobDoc, getContentForCampaign, getComplianceRule, getCampaignsForUser } from "./utils/firestore";
 import { runOrchestrator } from "./agents/orchestrator";
 import { runComplianceCheck } from "./agents/compliance";
-import { getFirestore, FieldValue } from "firebase-admin/firestore";
 import { ComplianceResult, ComplianceRuleDoc } from "./types/pipeline";
 
 interface GenerateCampaignInput {
