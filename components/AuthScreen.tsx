@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { Sparkles, Mail, Lock, Loader2 } from 'lucide-react';
+import { Sparkles, Mail, Lock, Loader2, ArrowLeft } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import { signUpWithEmail, signInWithEmail, signInWithGoogle, resetPassword } from '../services/authService';
 
 const FIREBASE_ERROR_MESSAGES: Record<string, string> = {
@@ -22,6 +23,7 @@ const getAuthErrorMessage = (err: unknown): string => {
 };
 
 export const AuthScreen: React.FC = () => {
+  const navigate = useNavigate();
   const [isSignUp, setIsSignUp] = useState(false);
   const [isForgotPassword, setIsForgotPassword] = useState(false);
   const [email, setEmail] = useState('');
@@ -197,6 +199,14 @@ export const AuthScreen: React.FC = () => {
             </>
           )}
         </p>
+
+        <button
+          onClick={() => navigate('/')}
+          className="mt-4 w-full flex items-center justify-center gap-1.5 text-sm text-slate-400 hover:text-slate-600 transition-colors"
+        >
+          <ArrowLeft size={14} />
+          Back to home
+        </button>
       </div>
     </div>
   );

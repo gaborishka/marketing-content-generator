@@ -10,12 +10,17 @@ import { CampaignDetail } from './components/CampaignDetail';
 import { ComplianceRules } from './components/ComplianceRules';
 import { ComplianceAnalytics } from './components/ComplianceAnalytics';
 import { BrandManager } from './components/BrandManager';
-import { Product, Campaign, GeneratedContent, ComplianceRule, Brand } from './types';
+import { LandingPageGenerator } from './components/LandingPageGenerator';
+import { Settings } from './components/Settings';
+import { Product, Campaign, GeneratedContent, ComplianceRule, Brand, LandingPageProject, UsageInfo } from './types';
 import { Loader2 } from 'lucide-react';
 import * as storage from './services/storageService';
 import { uploadContentImages, isBase64DataUrl } from './services/fileStorage';
 import { AuthScreen } from './components/AuthScreen';
+import { MarketingLandingPage } from './components/MarketingLandingPage';
 import { onAuthChange, logOut } from './services/authService';
+import { getShopifyStatus, ShopifyStatus } from './services/shopifyService';
+import { fetchUserProfileAndUsage } from './services/stripeService';
 import type { User } from 'firebase/auth';
 
 // Seed Data
@@ -31,7 +36,8 @@ const MOCK_PRODUCTS: Product[] = [
     features: ['12-hour relief', 'Non-drowsy', 'Easy-swallow coating'],
     imageUrl: 'https://images.unsplash.com/photo-1584308666744-24d5c474f2ae?auto=format&fit=crop&q=80&w=400',
     complianceFiles: ['fda-approval.pdf'],
-    marketingTags: ['pain relief', 'seniors', 'active lifestyle']
+    marketingTags: ['pain relief', 'seniors', 'active lifestyle'],
+    source: 'internal'
   },
   {
     id: 'prod-2',
@@ -44,7 +50,8 @@ const MOCK_PRODUCTS: Product[] = [
     features: ['Vitamin C + E', 'Cruelty-free', 'Dermatologist tested'],
     imageUrl: 'https://images.unsplash.com/photo-1620916566398-39f1143ab7be?auto=format&fit=crop&q=80&w=400',
     complianceFiles: [],
-    marketingTags: ['beauty', 'skincare', 'organic']
+    marketingTags: ['beauty', 'skincare', 'organic'],
+    source: 'internal'
   },
   {
     id: 'prod-3',
@@ -57,7 +64,8 @@ const MOCK_PRODUCTS: Product[] = [
     features: ['Caffeine-free', 'Natural ingredients', 'Clinically studied'],
     imageUrl: 'https://images.unsplash.com/photo-1550572017-edd951aa8f72?auto=format&fit=crop&q=80&w=400',
     complianceFiles: ['supplement-facts.pdf'],
-    marketingTags: ['focus', 'students', 'professionals']
+    marketingTags: ['focus', 'students', 'professionals'],
+    source: 'internal'
   }
 ];
 
@@ -152,18 +160,42 @@ function App() {
   const [contentStore, setContentStore] = useState<GeneratedContent[]>([]);
   const [complianceRules, setComplianceRules] = useState<ComplianceRule[]>([]);
   const [brands, setBrands] = useState<Brand[]>([]);
-  
+  const [landingPages, setLandingPages] = useState<LandingPageProject[]>([]);
+
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [isLoadingData, setIsLoadingData] = useState(true);
+  const [shopifyStatus, setShopifyStatus] = useState<ShopifyStatus>({ connected: false });
+  const [usageInfo, setUsageInfo] = useState<UsageInfo | null>(null);
 
   // Listen for auth state changes
   useEffect(() => {
     const unsubscribe = onAuthChange((user) => {
       setCurrentUser(user);
       setAuthLoading(false);
+      if (!user) {
+        setUsageInfo(null);
+      }
     });
     return unsubscribe;
+  }, []);
+
+  const refreshShopifyStatus = useCallback(async () => {
+    try {
+      const status = await getShopifyStatus();
+      setShopifyStatus(status);
+    } catch {
+      // Shopify status fetch failed — non-critical
+    }
+  }, []);
+
+  const refreshUsage = useCallback(async () => {
+    try {
+      const info = await fetchUserProfileAndUsage();
+      setUsageInfo(info);
+    } catch {
+      // Usage fetch failed — non-critical
+    }
   }, []);
 
   // Load Data from Firestore on Mount (only when authenticated)
@@ -172,19 +204,23 @@ function App() {
       setIsLoadingData(false);
       return;
     }
-    
+
     console.log('[App] Loading data for user:', currentUser.uid);
-    
+
     const loadData = async () => {
       try {
-        console.log('[App] Fetching data from Firestore...');
-        const [dbProducts, dbCampaigns, dbContent, dbComplianceRules, dbBrands] = await Promise.all([
+        const [dbProducts, dbCampaigns, dbContent, dbComplianceRules, dbBrands, dbLandingPages] = await Promise.all([
           storage.getAll<Product>('products'),
           storage.getAll<Campaign>('campaigns'),
           storage.getAll<GeneratedContent>('content'),
           storage.getAll<ComplianceRule>('complianceRules'),
-          storage.getAll<Brand>('brands')
+          storage.getAll<Brand>('brands'),
+          storage.getAll<LandingPageProject>('landingPages')
         ]);
+
+        // Scope seed IDs to current user to avoid cross-user document collisions
+        const prefix = currentUser!.uid.substring(0, 8);
+        const scopeId = (id: string) => `${prefix}_${id}`;
 
         console.log('[App] Data fetched:', {
           products: dbProducts.length,
@@ -199,44 +235,59 @@ function App() {
           console.log('[App] Seeding products...');
           await Promise.all(MOCK_PRODUCTS.map(p => storage.put('products', p)));
           setProducts(MOCK_PRODUCTS);
+          const seeded = MOCK_PRODUCTS.map(p => ({ ...p, id: scopeId(p.id) }));
+          await Promise.all(seeded.map(p => storage.put('products', p)));
+          setProducts(seeded);
         } else {
           setProducts(dbProducts);
         }
 
         if (dbCampaigns.length === 0) {
-          console.log('[App] Seeding campaigns...');
-          await Promise.all(MOCK_CAMPAIGNS.map(c => storage.put('campaigns', c)));
-          setCampaigns(MOCK_CAMPAIGNS);
+          const seeded = MOCK_CAMPAIGNS.map(c => ({
+            ...c,
+            id: scopeId(c.id),
+            primaryProductId: c.primaryProductId ? scopeId(c.primaryProductId) : undefined,
+            secondaryProductIds: c.secondaryProductIds?.map(scopeId) || [],
+          }));
+          await Promise.all(seeded.map(c => storage.put('campaigns', c)));
+          setCampaigns(seeded);
         } else {
           setCampaigns(dbCampaigns);
         }
 
         setComplianceRules(dbComplianceRules);
         setBrands(dbBrands);
+        setLandingPages(dbLandingPages);
 
         if (dbContent.length === 0) {
-          console.log('[App] Seeding content...');
-          await Promise.all(INITIAL_CONTENT.map(c => storage.put('content', c)));
-          setContentStore(INITIAL_CONTENT);
+          const seeded = INITIAL_CONTENT.map(c => ({
+            ...c,
+            id: scopeId(c.id),
+            campaignId: scopeId(c.campaignId),
+            connections: c.connections?.map(scopeId),
+          }));
+          await Promise.all(seeded.map(c => storage.put('content', c)));
+          setContentStore(seeded);
         } else {
           setContentStore(dbContent.filter(c => c.status !== 'generating'));
         }
-        
-        console.log('[App] Data loading complete');
       } catch (e) {
-        console.error("[App] Failed to load data from storage", e);
+        console.error("Failed to load data from storage", e);
         // Fallback to mocks in memory if DB fails
         setProducts(MOCK_PRODUCTS);
         setCampaigns(MOCK_CAMPAIGNS);
         setContentStore(INITIAL_CONTENT);
         setComplianceRules([]);
         setBrands([]);
+        setLandingPages([]);
       } finally {
         setIsLoadingData(false);
       }
     };
     loadData();
-  }, [currentUser]);
+    refreshShopifyStatus();
+    refreshUsage();
+  }, [currentUser, refreshShopifyStatus, refreshUsage]);
 
   const handleComplianceRuleCreate = (rule: ComplianceRule) => {
     setComplianceRules(prev => [rule, ...prev]);
@@ -261,6 +312,15 @@ function App() {
       return c;
     }));
   };
+
+  const refreshProducts = useCallback(async () => {
+    try {
+      const dbProducts = await storage.getAll<Product>('products');
+      setProducts(dbProducts.length > 0 ? dbProducts : MOCK_PRODUCTS);
+    } catch {
+      // Non-critical
+    }
+  }, []);
 
   const handleProductCreate = (product: Product) => {
     setProducts(prev => [product, ...prev]);
@@ -307,6 +367,20 @@ function App() {
   const handleBrandDelete = (brandId: string) => {
     setBrands(prev => prev.filter(b => b.id !== brandId));
     storage.deleteItem('brands', brandId);
+  };
+
+  const handleLandingPageSave = (project: LandingPageProject) => {
+    setLandingPages(prev => {
+      const exists = prev.find(p => p.id === project.id);
+      if (exists) return prev.map(p => p.id === project.id ? project : p);
+      return [project, ...prev];
+    });
+    storage.put('landingPages', project);
+  };
+
+  const handleLandingPageDelete = (id: string) => {
+    setLandingPages(prev => prev.filter(p => p.id !== id));
+    storage.deleteItem('landingPages', id);
   };
 
   const handleCampaignCreated = (newCampaign: Campaign) => {
@@ -416,7 +490,7 @@ function App() {
     }
   };
 
-  if (authLoading || isLoadingData) {
+  if (authLoading) {
     return (
       <div className="h-screen flex flex-col items-center justify-center bg-slate-50 text-slate-400">
         <Loader2 className="animate-spin mb-2" size={32} />
@@ -426,12 +500,29 @@ function App() {
   }
 
   if (!currentUser) {
-    return <AuthScreen />;
+    return (
+      <Router>
+        <Routes>
+          <Route path="/" element={<MarketingLandingPage />} />
+          <Route path="/auth" element={<AuthScreen />} />
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+      </Router>
+    );
+  }
+
+  if (isLoadingData) {
+    return (
+      <div className="h-screen flex flex-col items-center justify-center bg-slate-50 text-slate-400">
+        <Loader2 className="animate-spin mb-2" size={32} />
+        <span>Loading MarketGen AI...</span>
+      </div>
+    );
   }
 
   return (
     <Router>
-      <Layout onSignOut={logOut} userName={currentUser.displayName || currentUser.email || 'User'}>
+      <Layout onSignOut={logOut} userName={currentUser.displayName || currentUser.email || 'User'} usageInfo={usageInfo}>
         <Routes>
           <Route path="/" element={<Dashboard />} />
           <Route path="/campaigns" element={<CampaignList campaigns={campaigns} />} />
@@ -456,6 +547,8 @@ function App() {
                 onUpdateContent={handleContentStoreUpdate}
                 onUpdateCampaign={handleCampaignUpdate}
                 onUpdateItem={handleUpdateItem}
+                usageInfo={usageInfo}
+                onRefreshUsage={refreshUsage}
               />
             } 
           />
@@ -465,6 +558,9 @@ function App() {
               onCreate={handleProductCreate}
               onUpdate={handleProductUpdate}
               onDelete={handleProductDelete}
+              shopifyStatus={shopifyStatus}
+              onShopifyStatusChange={refreshShopifyStatus}
+              onProductsImported={refreshProducts}
             />
           } />
           <Route
@@ -497,6 +593,26 @@ function App() {
               <ComplianceAnalytics
                 rules={complianceRules}
                 campaigns={campaigns}
+              />
+            }
+          />
+          <Route
+            path="/landing"
+            element={
+              <LandingPageGenerator
+                landingPages={landingPages}
+                onSave={handleLandingPageSave}
+                onDelete={handleLandingPageDelete}
+                onRefreshUsage={refreshUsage}
+              />
+            }
+          />
+          <Route
+            path="/settings"
+            element={
+              <Settings
+                usageInfo={usageInfo}
+                onRefreshUsage={refreshUsage}
               />
             }
           />

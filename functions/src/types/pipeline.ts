@@ -1,5 +1,33 @@
 // Pipeline types for the backend agent orchestration system.
 
+// ── User & Billing ────────────────────────────────────────────────────────
+
+export type UserTier = "free" | "pro";
+
+export interface UserProfileDoc {
+  uid: string;
+  email: string;
+  displayName: string;
+  tier: UserTier;
+  stripeCustomerId?: string;
+  stripeSubscriptionId?: string;
+  stripeSubscriptionStatus?: string;
+  createdAt: FirebaseFirestore.Timestamp;
+  updatedAt: FirebaseFirestore.Timestamp;
+}
+
+export interface DailyUsageDoc {
+  uid: string;
+  date: string; // YYYY-MM-DD
+  generationCount: number;
+  updatedAt: FirebaseFirestore.Timestamp;
+}
+
+export const TIER_LIMITS: Record<UserTier, number> = {
+  free: 10,
+  pro: 100,
+};
+
 // ── Job Status ─────────────────────────────────────────────────────────────
 
 export type JobPhase =
@@ -137,6 +165,8 @@ export interface CampaignDoc {
   complianceRuleId?: string;
 }
 
+export type ProductSource = "internal" | "shopify";
+
 export interface ProductDoc {
   id: string;
   userId: string;
@@ -150,6 +180,19 @@ export interface ProductDoc {
   imageUrl: string;
   complianceFiles: string[];
   marketingTags: string[];
+  source: ProductSource;
+  shopifyProductId?: string;
+  shopifyHandle?: string;
+  lastSyncedAt?: string;
+}
+
+export interface ShopifyConnectionDoc {
+  userId: string;
+  shopDomain: string;
+  accessToken: string;
+  scope: string;
+  installedAt: string;
+  shopName?: string;
 }
 
 export interface ComplianceRuleDoc {

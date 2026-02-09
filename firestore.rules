@@ -4,10 +4,10 @@ service cloud.firestore {
     // Per-user data scoping: documents must have userId matching the authenticated user
     match /products/{id} {
       allow read: if request.auth != null && resource.data.userId == request.auth.uid;
-      allow create: if request.auth != null 
+      allow create: if request.auth != null
                     && request.resource.data.userId == request.auth.uid;
-      allow update: if request.auth != null 
-                    && resource.exists 
+      allow update: if request.auth != null
+                    && resource.exists
                     && resource.data.userId == request.auth.uid
                     && request.resource.data.userId == request.auth.uid;
       allow delete: if request.auth != null && resource.data.userId == request.auth.uid;
@@ -15,8 +15,8 @@ service cloud.firestore {
     match /campaigns/{id} {
       allow read: if request.auth != null && resource.data.userId == request.auth.uid;
       allow create: if request.auth != null && request.resource.data.userId == request.auth.uid;
-      allow update: if request.auth != null 
-                    && resource.exists 
+      allow update: if request.auth != null
+                    && resource.exists
                     && resource.data.userId == request.auth.uid
                     && request.resource.data.userId == request.auth.uid;
       allow delete: if request.auth != null && resource.data.userId == request.auth.uid;
@@ -24,13 +24,64 @@ service cloud.firestore {
     match /content/{id} {
       allow read: if request.auth != null && resource.data.userId == request.auth.uid;
       allow create: if request.auth != null && request.resource.data.userId == request.auth.uid;
-      allow update: if request.auth != null 
-                    && resource.exists 
+      allow update: if request.auth != null
+                    && resource.exists
                     && resource.data.userId == request.auth.uid
                     && request.resource.data.userId == request.auth.uid;
       allow delete: if request.auth != null && resource.data.userId == request.auth.uid;
     }
     match /complianceRules/{id} {
+      allow read: if request.auth != null && resource.data.userId == request.auth.uid;
+      allow create: if request.auth != null && request.resource.data.userId == request.auth.uid;
+      allow update: if request.auth != null && resource.data.userId == request.auth.uid
+                    && request.resource.data.userId == request.auth.uid;
+      allow delete: if request.auth != null && resource.data.userId == request.auth.uid;
+    }
+    match /brands/{id} {
+          allow read: if request.auth != null && resource.data.userId == request.auth.uid;
+          allow create: if request.auth != null && request.resource.data.userId == request.auth.uid;
+          allow update: if request.auth != null && resource.data.userId == request.auth.uid
+                        && request.resource.data.userId == request.auth.uid;
+          allow delete: if request.auth != null && resource.data.userId == request.auth.uid;
+        }
+        // Campaign compliance analytics: read/write for authenticated owner
+        match /campaignComplianceAnalytics/{id} {
+          allow read: if request.auth != null && resource.data.userId == request.auth.uid;
+          allow create: if request.auth != null && request.resource.data.userId == request.auth.uid;
+          allow update: if request.auth != null && resource.data.userId == request.auth.uid
+                        && request.resource.data.userId == request.auth.uid;
+          allow delete: if request.auth != null && resource.data.userId == request.auth.uid;
+        }
+    match /campaigns/{id} {
+      allow read: if request.auth != null && resource.data.userId == request.auth.uid;
+      allow create: if request.auth != null && request.resource.data.userId == request.auth.uid;
+      allow update: if request.auth != null && resource.data.userId == request.auth.uid
+                    && request.resource.data.userId == request.auth.uid;
+      allow delete: if request.auth != null && resource.data.userId == request.auth.uid;
+    }
+    match /content/{id} {
+      allow read: if request.auth != null && resource.data.userId == request.auth.uid;
+      allow create: if request.auth != null && request.resource.data.userId == request.auth.uid;
+      allow update: if request.auth != null && resource.data.userId == request.auth.uid
+                    && request.resource.data.userId == request.auth.uid;
+      allow delete: if request.auth != null && resource.data.userId == request.auth.uid;
+    }
+    match /complianceRules/{id} {
+      allow read: if request.auth != null && resource.data.userId == request.auth.uid;
+      allow create: if request.auth != null && request.resource.data.userId == request.auth.uid;
+      allow update: if request.auth != null && resource.data.userId == request.auth.uid
+                    && request.resource.data.userId == request.auth.uid;
+      allow delete: if request.auth != null && resource.data.userId == request.auth.uid;
+    }
+    // Individual compliance checks: read/write for authenticated owner
+        match /complianceChecks/{id} {
+          allow read: if request.auth != null && resource.data.userId == request.auth.uid;
+          allow create: if request.auth != null && request.resource.data.userId == request.auth.uid;
+          allow update: if request.auth != null && resource.data.userId == request.auth.uid
+                        && request.resource.data.userId == request.auth.uid;
+          allow delete: if request.auth != null && resource.data.userId == request.auth.uid;
+        }
+    match /landingPages/{id} {
       allow read: if request.auth != null && resource.data.userId == request.auth.uid;
       allow create: if request.auth != null && request.resource.data.userId == request.auth.uid;
       allow update: if request.auth != null && resource.data.userId == request.auth.uid
@@ -44,22 +95,6 @@ service cloud.firestore {
                     && request.resource.data.userId == request.auth.uid;
       allow delete: if request.auth != null && resource.data.userId == request.auth.uid;
     }
-    // Campaign compliance analytics: read/write for authenticated owner
-    match /campaignComplianceAnalytics/{id} {
-      allow read: if request.auth != null && resource.data.userId == request.auth.uid;
-      allow create: if request.auth != null && request.resource.data.userId == request.auth.uid;
-      allow update: if request.auth != null && resource.data.userId == request.auth.uid
-                    && request.resource.data.userId == request.auth.uid;
-      allow delete: if request.auth != null && resource.data.userId == request.auth.uid;
-    }
-    // Individual compliance checks: read/write for authenticated owner
-    match /complianceChecks/{id} {
-      allow read: if request.auth != null && resource.data.userId == request.auth.uid;
-      allow create: if request.auth != null && request.resource.data.userId == request.auth.uid;
-      allow update: if request.auth != null && resource.data.userId == request.auth.uid
-                    && request.resource.data.userId == request.auth.uid;
-      allow delete: if request.auth != null && resource.data.userId == request.auth.uid;
-    }
     // Generation jobs: read-only for authenticated owner, created by Cloud Functions only
     match /generationJobs/{id} {
       allow read: if request.auth != null && resource.data.userId == request.auth.uid;
@@ -67,6 +102,29 @@ service cloud.firestore {
     }
     // Job locks: server-side only, no client access
     match /generationJobLocks/{id} {
+      allow read, write: if false;
+    }
+    // Shopify connections: server-side only, no client access
+    match /shopifyConnections/{userId} {
+      allow read, write: if false;
+    }
+    // Shopify OAuth state tokens: server-side only, no client access
+    match /shopifyOAuthStates/{stateId} {
+      allow read, write: if false;
+    }
+    // User profiles: read-only for owner, writes only via Cloud Functions
+    match /users/{userId} {
+      allow read: if request.auth != null && request.auth.uid == userId;
+      allow create, update, delete: if false;
+
+      // Daily usage: read-only for owner, writes only via Cloud Functions
+      match /usage/{date} {
+        allow read: if request.auth != null && request.auth.uid == userId;
+        allow create, update, delete: if false;
+      }
+    }
+    // Stripe webhook events: server-side only, no client access
+    match /stripeEvents/{eventId} {
       allow read, write: if false;
     }
     // Content history: read/write for authenticated owner

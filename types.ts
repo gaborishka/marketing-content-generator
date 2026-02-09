@@ -2,7 +2,36 @@
 // User Roles
 export type UserRole = 'admin' | 'marketer' | 'reviewer';
 
+// User Tiers & Billing
+export type UserTier = 'free' | 'pro';
+
+export interface UserProfile {
+  uid: string;
+  email: string;
+  displayName: string;
+  tier: UserTier;
+  stripeCustomerId?: string;
+  stripeSubscriptionId?: string;
+  stripeSubscriptionStatus?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface UsageInfo {
+  tier: UserTier;
+  stripeSubscriptionStatus?: string;
+  generationCount: number;
+  limit: number;
+}
+
+export const TIER_LIMITS: Record<UserTier, number> = {
+  free: 10,
+  pro: 100,
+};
+
 // Products
+export type ProductSource = 'internal' | 'shopify';
+
 export interface Product {
   id: string;
   name: string;
@@ -15,6 +44,10 @@ export interface Product {
   imageUrl: string;
   complianceFiles: string[];
   marketingTags: string[];
+  source: ProductSource;
+  shopifyProductId?: string;
+  shopifyHandle?: string;
+  lastSyncedAt?: string;
 }
 
 // Compliance Rules
@@ -152,4 +185,29 @@ for (const [parent, formats] of Object.entries(CHANNEL_FORMATS)) {
 
 export function getParentChannel(subFormat: string): string {
   return SUB_FORMAT_TO_PARENT[subFormat] ?? subFormat;
+}
+
+// Landing Page Interview
+export interface InterviewQuestion {
+  label: string;
+  question: string;
+  options: string[];
+}
+
+// Chat-based Landing Page Generator
+export interface ChatMessage {
+  id: string;
+  role: 'user' | 'assistant';
+  content: string;
+  images?: string[];
+  timestamp: number;
+}
+
+export interface LandingPageProject {
+  id: string;
+  title: string;
+  conversationHistory: ChatMessage[];
+  currentHtml: string | null;
+  createdAt: number;
+  updatedAt: number;
 }

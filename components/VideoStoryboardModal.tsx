@@ -20,12 +20,14 @@ interface VideoStoryboardModalProps {
   content: GeneratedContent;
   onClose: () => void;
   onUpdate: (updatedContent: GeneratedContent) => void;
+  onRefreshUsage?: () => void;
 }
 
-export const VideoStoryboardModal: React.FC<VideoStoryboardModalProps> = ({ 
-  content, 
-  onClose, 
-  onUpdate 
+export const VideoStoryboardModal: React.FC<VideoStoryboardModalProps> = ({
+  content,
+  onClose,
+  onUpdate,
+  onRefreshUsage
 }) => {
   const [isGeneratingVideo, setIsGeneratingVideo] = useState(false);
   const [activeTab, setActiveTab] = useState<'video' | 'slideshow'>('video');
@@ -50,17 +52,21 @@ export const VideoStoryboardModal: React.FC<VideoStoryboardModalProps> = ({
 
     try {
       const videoUrl = await generateVideoFromStoryboard(content.storyboard, content.id);
-      onUpdate({ 
-        ...content, 
-        videoUrl, 
-        videoStatus: 'completed' 
+      onUpdate({
+        ...content,
+        videoUrl,
+        videoStatus: 'completed'
       });
     } catch (error: any) {
       console.error("Video gen failed", error);
       onUpdate({ ...content, videoStatus: 'failed' });
-      alert(`Video generation failed: ${error.message || "Unknown error"}`);
+      const isQuotaError = error?.code === 'functions/resource-exhausted';
+      alert(isQuotaError
+        ? 'Daily generation limit reached. Upgrade to Pro for more generations.'
+        : `Video generation failed: ${error.message || "Unknown error"}`);
     } finally {
       setIsGeneratingVideo(false);
+      onRefreshUsage?.();
     }
   };
 
