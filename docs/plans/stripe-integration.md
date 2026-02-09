@@ -129,7 +129,7 @@ MarketGen AI needs tiered user management with usage limits. Currently: Firebase
 
 ### Phase 8: Tests
 
-- [ ] **8.1 Create `functions/src/__tests__/billing.test.ts`**
+- [x] **8.1 Create `functions/src/__tests__/billing.test.ts`**
   - Test `checkQuota` (under/over limit, free/pro tiers)
   - Test `incrementUsage` (atomic increment)
   - Test `getOrCreateUserProfile` (create + idempotent)
