@@ -1,8 +1,9 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import {
   buildShopifyAuthUrl,
   verifyShopifyHmac,
   isValidShopDomain,
+  exchangeCodeForToken,
 } from "../shopify/auth";
 
 describe("Shopify Auth Helpers", () => {
@@ -65,6 +66,54 @@ describe("Shopify Auth Helpers", () => {
       const hmac = crypto.createHmac("sha256", "test-secret").update(message).digest("hex");
 
       expect(verifyShopifyHmac({ ...params, hmac }, "test-secret")).toBe(true);
+    });
+  });
+
+  describe("exchangeCodeForToken", () => {
+    beforeEach(() => {
+      vi.restoreAllMocks();
+    });
+
+    it("sends form-encoded body with correct Content-Type", async () => {
+      const mockFetch = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+        new Response(JSON.stringify({ access_token: "tok_123", scope: "read_products" }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        })
+      );
+
+      const result = await exchangeCodeForToken(
+        "test.myshopify.com",
+        "auth-code-xyz",
+        "client-id",
+        "client-secret"
+      );
+
+      expect(result.access_token).toBe("tok_123");
+      expect(result.scope).toBe("read_products");
+
+      const [url, options] = mockFetch.mock.calls[0];
+      expect(url).toBe("https://test.myshopify.com/admin/oauth/access_token");
+      expect(options?.headers).toEqual(
+        expect.objectContaining({ "Content-Type": "application/x-www-form-urlencoded" })
+      );
+
+      // Body should be form-encoded, not JSON
+      const body = options?.body as string;
+      const params = new URLSearchParams(body);
+      expect(params.get("client_id")).toBe("client-id");
+      expect(params.get("client_secret")).toBe("client-secret");
+      expect(params.get("code")).toBe("auth-code-xyz");
+    });
+
+    it("throws on non-OK response", async () => {
+      vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+        new Response("Bad Request", { status: 400 })
+      );
+
+      await expect(
+        exchangeCodeForToken("test.myshopify.com", "bad-code", "cid", "csecret")
+      ).rejects.toThrow("Token exchange failed: 400");
     });
   });
 });

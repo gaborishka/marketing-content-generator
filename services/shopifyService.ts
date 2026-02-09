@@ -28,7 +28,7 @@ export interface ShopifyResyncResult {
 // ── Cloud Function references ────────────────────────────────────────────────
 
 const getStatusFn = httpsCallable<void, ShopifyStatus>(functions, 'getShopifyConnectionStatus');
-const authInitFn = httpsCallable<{ shopDomain: string }, { authUrl: string }>(functions, 'shopifyAuthInit');
+const authInitFn = httpsCallable<void, { authUrl: string }>(functions, 'shopifyAuthInit');
 const disconnectFn = httpsCallable<void, { success: boolean }>(functions, 'shopifyDisconnect');
 const browseFn = httpsCallable<
   { query?: string; limit?: number; pageInfo?: string },
@@ -44,8 +44,8 @@ export async function getShopifyStatus(): Promise<ShopifyStatus> {
   return result.data;
 }
 
-export async function startShopifyAuth(shopDomain: string): Promise<{ authUrl: string }> {
-  const result = await authInitFn({ shopDomain });
+export async function startShopifyAuth(): Promise<{ authUrl: string }> {
+  const result = await authInitFn();
   return result.data;
 }
 

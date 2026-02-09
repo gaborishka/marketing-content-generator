@@ -12,6 +12,8 @@ import { GEMINI_API_KEY } from "./utils/gemini";
 import {
   SHOPIFY_CLIENT_ID,
   SHOPIFY_CLIENT_SECRET,
+  SHOPIFY_API_VERSION,
+  ShopifyAuthError,
   fetchShopifyProducts as fetchShopifyProductsApi,
   fetchShopifyProduct,
   mapShopifyToProduct,
@@ -408,37 +410,28 @@ export const processGenerationJob = onDocumentCreated(
 
 const SHOPIFY_REDIRECT_PATH = "shopifyAuthCallback";
 
+const SHOPIFY_INSTALL_URL = "https://admin.shopify.com/oauth/install_custom_app?client_id=64d2d6b17596adbfcdf39c6bbdd40e9c&no_redirect=true&signature=eyJleHBpcmVzX2F0IjoxNzcxMTQ3Mzg0LCJwZXJtYW5lbnRfZG9tYWluIjoiYWdvcnl4Lm15c2hvcGlmeS5jb20iLCJjbGllbnRfaWQiOiI2NGQyZDZiMTc1OTZhZGJmY2RmMzljNmJiZGQ0MGU5YyIsInB1cnBvc2UiOiJjdXN0b21fYXBwIiwibWVyY2hhbnRfb3JnYW5pemF0aW9uX2lkIjoxNTQxOTM4Njd9--ef43dcdbcace615af1320cdda5cd91625b1c8071";
+const SHOPIFY_SHOP_DOMAIN = "agoryx.myshopify.com";
+
 export const shopifyAuthInit = onCall(
-  { timeoutSeconds: 10, memory: "256MiB", secrets: [SHOPIFY_CLIENT_ID], cors: true },
+  { timeoutSeconds: 10, memory: "256MiB", cors: true },
   async (request) => {
     if (!request.auth) {
       throw new HttpsError("unauthenticated", "Authentication required.");
     }
 
-    const { shopDomain } = request.data as { shopDomain: string };
-    if (!shopDomain || !isValidShopDomain(shopDomain)) {
-      throw new HttpsError("invalid-argument", "Invalid Shopify domain. Must be like your-store.myshopify.com");
-    }
-
-    const state = randomUUID();
     const userId = request.auth.uid;
 
-    // Store state for verification on callback
+    // Store pending auth for user association on callback
     const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 min TTL
-    await getFirestore().collection("shopifyOAuthStates").doc(state).set({
+    await getFirestore().collection("shopifyOAuthStates").doc(randomUUID()).set({
       userId,
-      shopDomain,
+      shopDomain: SHOPIFY_SHOP_DOMAIN,
       createdAt: FieldValue.serverTimestamp(),
       expiresAt: expiresAt.toISOString(),
     });
 
-    // Build the redirect URL — assumes function is deployed at standard Firebase path
-    const projectId = process.env.GCLOUD_PROJECT || process.env.GCP_PROJECT || "";
-    const redirectUri = `https://us-central1-${projectId}.cloudfunctions.net/${SHOPIFY_REDIRECT_PATH}`;
-
-    const authUrl = buildShopifyAuthUrl(shopDomain, SHOPIFY_CLIENT_ID.value(), redirectUri, state);
-
-    return { authUrl };
+    return { authUrl: SHOPIFY_INSTALL_URL };
   }
 );
 
@@ -448,8 +441,57 @@ export const shopifyAuthCallback = onRequest(
     const query = req.query as Record<string, string>;
     const { code, state, shop } = query;
 
-    if (!code || !state || !shop) {
-      res.status(400).send("Missing required OAuth parameters.");
+    // App launch redirect (no code) — re-initiate OAuth to get a code.
+    // This happens when Shopify redirects to the callback for an already-installed
+    // app (e.g. via custom install URL). The standard OAuth authorize endpoint
+    // will return with a code even for installed apps.
+    if (!code) {
+      if (shop && isValidShopDomain(shop)) {
+        // Look up the pending auth state to find the userId
+        const pendingStates = await getFirestore()
+          .collection("shopifyOAuthStates")
+          .where("shopDomain", "==", shop)
+          .orderBy("createdAt", "desc")
+          .limit(1)
+          .get();
+
+        let userId: string | undefined;
+        if (!pendingStates.empty) {
+          userId = pendingStates.docs[0].data().userId as string;
+        }
+
+        if (!userId) {
+          const configDoc = await getFirestore().collection("appConfig").doc("shopify").get();
+          const frontendUrl = configDoc.exists ? configDoc.data()?.frontendUrl : null;
+          const redirectBase = frontendUrl || "http://localhost:3000";
+          res.redirect(`${redirectBase}/#/products?shopify=error&reason=no_pending_auth`);
+          return;
+        }
+
+        // Generate a fresh state token and persist it
+        const newState = randomUUID();
+        const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
+        await getFirestore().collection("shopifyOAuthStates").doc(newState).set({
+          userId,
+          shopDomain: shop,
+          createdAt: FieldValue.serverTimestamp(),
+          expiresAt: expiresAt.toISOString(),
+        });
+
+        const redirectUri = `https://us-central1-${process.env.GCLOUD_PROJECT || process.env.GCP_PROJECT || ""}.cloudfunctions.net/${SHOPIFY_REDIRECT_PATH}`;
+        const authUrl = buildShopifyAuthUrl(shop, SHOPIFY_CLIENT_ID.value(), redirectUri, newState);
+        res.redirect(authUrl);
+      } else {
+        const configDoc = await getFirestore().collection("appConfig").doc("shopify").get();
+        const frontendUrl = configDoc.exists ? configDoc.data()?.frontendUrl : null;
+        const redirectBase = frontendUrl || "http://localhost:3000";
+        res.redirect(`${redirectBase}/#/products`);
+      }
+      return;
+    }
+
+    if (!shop) {
+      res.status(400).send("Missing required OAuth parameter: shop.");
       return;
     }
 
@@ -459,28 +501,58 @@ export const shopifyAuthCallback = onRequest(
       return;
     }
 
-    // Verify state token
-    const stateRef = getFirestore().collection("shopifyOAuthStates").doc(state);
-    const stateDoc = await stateRef.get();
+    let userId: string;
+    let shopDomain: string;
 
-    if (!stateDoc.exists) {
-      res.status(403).send("Invalid or expired state token.");
-      return;
-    }
+    if (state) {
+      // Standard OAuth flow: verify state token directly
+      const stateRef = getFirestore().collection("shopifyOAuthStates").doc(state);
+      const stateDoc = await stateRef.get();
 
-    const stateData = stateDoc.data()!;
-    const expiresAt = new Date(stateData.expiresAt);
-    if (expiresAt < new Date()) {
+      if (!stateDoc.exists) {
+        res.status(403).send("Invalid or expired state token.");
+        return;
+      }
+
+      const stateData = stateDoc.data()!;
+      const expiresAt = new Date(stateData.expiresAt);
+      if (expiresAt < new Date()) {
+        await stateRef.delete();
+        res.status(403).send("State token expired.");
+        return;
+      }
+
       await stateRef.delete();
-      res.status(403).send("State token expired.");
-      return;
+      userId = stateData.userId as string;
+      shopDomain = stateData.shopDomain as string;
+    } else {
+      // Custom app install flow: no state param, look up by shop domain
+      const statesSnapshot = await getFirestore()
+        .collection("shopifyOAuthStates")
+        .where("shopDomain", "==", shop)
+        .orderBy("createdAt", "desc")
+        .limit(1)
+        .get();
+
+      if (statesSnapshot.empty) {
+        res.status(403).send("No pending authorization found for this store. Please initiate connection from the app first.");
+        return;
+      }
+
+      const pendingDoc = statesSnapshot.docs[0];
+      const pendingData = pendingDoc.data();
+      const expiresAt = new Date(pendingData.expiresAt);
+
+      if (expiresAt < new Date()) {
+        await pendingDoc.ref.delete();
+        res.status(403).send("Authorization expired. Please try again from the app.");
+        return;
+      }
+
+      await pendingDoc.ref.delete();
+      userId = pendingData.userId as string;
+      shopDomain = pendingData.shopDomain as string;
     }
-
-    // Delete state token (one-time use)
-    await stateRef.delete();
-
-    const userId = stateData.userId as string;
-    const shopDomain = stateData.shopDomain as string;
 
     try {
       // Exchange code for access token
@@ -494,7 +566,7 @@ export const shopifyAuthCallback = onRequest(
       // Fetch shop name
       let shopName: string | undefined;
       try {
-        const shopRes = await fetch(`https://${shopDomain}/admin/api/2024-01/shop.json`, {
+        const shopRes = await fetch(`https://${shopDomain}/admin/api/${SHOPIFY_API_VERSION}/shop.json`, {
           headers: { "X-Shopify-Access-Token": tokenResponse.access_token },
         });
         if (shopRes.ok) {
@@ -515,8 +587,11 @@ export const shopifyAuthCallback = onRequest(
         shopName,
       });
 
-      // Redirect back to app
-      res.redirect("/#/products?shopify=connected");
+      // Redirect back to frontend app
+      const configDoc = await getFirestore().collection("appConfig").doc("shopify").get();
+      const frontendUrl = configDoc.exists ? configDoc.data()?.frontendUrl : null;
+      const redirectBase = frontendUrl || "http://localhost:3000";
+      res.redirect(`${redirectBase}/#/products?shopify=connected`);
     } catch (error: any) {
       console.error("shopifyAuthCallback error:", error);
       res.status(500).send("Failed to complete Shopify authentication.");
@@ -596,6 +671,9 @@ export const browseShopifyProducts = onCall(
         hasMore: result.hasMore,
       };
     } catch (error: any) {
+      if (error instanceof ShopifyAuthError) {
+        throw new HttpsError("failed-precondition", "Shopify connection expired. Please reconnect your store.");
+      }
       console.error("browseShopifyProducts error:", error);
       throw new HttpsError("internal", error.message || "Failed to fetch Shopify products.");
     }
@@ -642,6 +720,9 @@ export const importShopifyProducts = onCall(
         await setProductDoc(product as any);
         imported++;
       } catch (error: any) {
+        if (error instanceof ShopifyAuthError) {
+          throw new HttpsError("failed-precondition", "Shopify connection expired. Please reconnect your store.");
+        }
         console.error(`Failed to import Shopify product ${spId}:`, error);
       }
     }
@@ -688,6 +769,9 @@ export const resyncShopifyProducts = onCall(
         await setProductDoc(freshData as any);
         synced++;
       } catch (error: any) {
+        if (error instanceof ShopifyAuthError) {
+          throw new HttpsError("failed-precondition", "Shopify connection expired. Please reconnect your store.");
+        }
         console.error(`Failed to resync product ${existing.id}:`, error);
         failed.push(existing.id);
       }

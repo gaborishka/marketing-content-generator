@@ -17,7 +17,6 @@ export function buildShopifyAuthUrl(
     scope: SHOPIFY_SCOPE,
     redirect_uri: redirectUri,
     state,
-    grant_options: "",
   });
   return `https://${shopDomain}/admin/oauth/authorize?${params.toString()}`;
 }
@@ -59,12 +58,15 @@ export async function exchangeCodeForToken(
 
   const res = await fetch(url, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded",
+      "Accept": "application/json",
+    },
+    body: new URLSearchParams({
       client_id: clientId,
       client_secret: clientSecret,
       code,
-    }),
+    }).toString(),
   });
 
   if (!res.ok) {

@@ -40,16 +40,72 @@ export interface ShopifyProductsResult {
   hasMore: boolean;
 }
 
+// ── Constants ─────────────────────────────────────────────────────────────
+
+export const SHOPIFY_API_VERSION = "2025-01";
+
+// ── Error types ───────────────────────────────────────────────────────────
+
+export class ShopifyAuthError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ShopifyAuthError";
+  }
+}
+
 // ── Fetch helpers ─────────────────────────────────────────────────────────
 
 function shopifyApiUrl(shopDomain: string, path: string): string {
-  return `https://${shopDomain}/admin/api/2024-01/${path}`;
+  return `https://${shopDomain}/admin/api/${SHOPIFY_API_VERSION}/${path}`;
 }
 
 function parseLinkHeader(linkHeader: string | null): string | null {
   if (!linkHeader) return null;
   const match = linkHeader.match(/<[^>]*page_info=([^&>]+)[^>]*>;\s*rel="next"/);
   return match ? match[1] : null;
+}
+
+async function fetchWithRetry(
+  url: string,
+  options: RequestInit,
+  maxRetries = 3
+): Promise<Response> {
+  let lastError: Error | undefined;
+
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    const res = await fetch(url, options);
+
+    // Expired or revoked token — no retry will help
+    if (res.status === 401) {
+      throw new ShopifyAuthError(
+        "Shopify access token is invalid or expired. Please reconnect your store."
+      );
+    }
+
+    // Rate limited — retry with backoff
+    if (res.status === 429) {
+      if (attempt >= maxRetries) {
+        throw new Error(`Shopify rate limit exceeded after ${maxRetries + 1} attempts`);
+      }
+      const retryAfter = res.headers.get("Retry-After");
+      const waitMs = retryAfter ? parseFloat(retryAfter) * 1000 : 1000 * Math.pow(2, attempt);
+      await new Promise((resolve) => setTimeout(resolve, waitMs));
+      continue;
+    }
+
+    // Proactive throttling: if the bucket is nearly full, pause briefly
+    const callLimit = res.headers.get("X-Shopify-Shop-Api-Call-Limit");
+    if (callLimit) {
+      const [used, total] = callLimit.split("/").map(Number);
+      if (used && total && used >= total - 2) {
+        await new Promise((resolve) => setTimeout(resolve, 500));
+      }
+    }
+
+    return res;
+  }
+
+  throw lastError || new Error("fetchWithRetry exhausted retries");
 }
 
 export async function fetchShopifyProducts(
@@ -70,7 +126,7 @@ export async function fetchShopifyProducts(
     url = shopifyApiUrl(shopDomain, `products.json?${queryParts.join("&")}`);
   }
 
-  const res = await fetch(url, {
+  const res = await fetchWithRetry(url, {
     headers: {
       "X-Shopify-Access-Token": accessToken,
       "Content-Type": "application/json",
@@ -98,7 +154,7 @@ export async function fetchShopifyProduct(
 ): Promise<ShopifyProduct> {
   const url = shopifyApiUrl(shopDomain, `products/${productId}.json`);
 
-  const res = await fetch(url, {
+  const res = await fetchWithRetry(url, {
     headers: {
       "X-Shopify-Access-Token": accessToken,
       "Content-Type": "application/json",

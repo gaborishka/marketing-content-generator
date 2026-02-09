@@ -15,6 +15,14 @@
         { "fieldPath": "campaignId", "order": "ASCENDING" },
         { "fieldPath": "userId", "order": "ASCENDING" }
       ]
+    },
+    {
+      "collectionGroup": "shopifyOAuthStates",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "shopDomain", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
     }
   ],
   "fieldOverrides": []
