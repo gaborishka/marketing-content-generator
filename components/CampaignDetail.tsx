@@ -41,7 +41,7 @@ import {
   ChevronRight
 } from 'lucide-react';
 import { useParams, Link } from 'react-router-dom';
-import { Campaign, Product, GeneratedContent, ComplianceRule, CHANNEL_FORMATS, getParentChannel } from '../types';
+import { Campaign, Product, GeneratedContent, ComplianceRule, CHANNEL_FORMATS, getParentChannel, UsageInfo } from '../types';
 import { CanvasBoard, INITIAL_CANVAS_SCALE } from './CanvasBoard';
 import { startGeneration, subscribeToJob, subscribeToContent, JobStatus } from '../services/orchestrationService';
 import { VideoStoryboardModal } from './VideoStoryboardModal';
@@ -57,6 +57,8 @@ interface CampaignDetailProps {
   onUpdateContent: (content: GeneratedContent[]) => void;
   onUpdateCampaign: (campaign: Campaign) => void;
   onUpdateItem: (content: GeneratedContent) => void;
+  usageInfo?: UsageInfo | null;
+  onRefreshUsage?: () => void;
 }
 
 interface ChipOption {
@@ -98,7 +100,9 @@ export const CampaignDetail: React.FC<CampaignDetailProps> = ({
   contentStore,
   onUpdateContent,
   onUpdateCampaign,
-  onUpdateItem
+  onUpdateItem,
+  usageInfo,
+  onRefreshUsage
 }) => {
   const { id } = useParams<{ id: string }>();
   const [isGenerating, setIsGenerating] = useState(false);
@@ -379,6 +383,16 @@ export const CampaignDetail: React.FC<CampaignDetailProps> = ({
   const handleGenerateMore = async () => {
     if (!campaign || isGenerating) return;
 
+    // Client-side quota pre-check (server also enforces)
+    if (usageInfo && usageInfo.generationCount >= usageInfo.limit) {
+      setStatusMessage(
+        usageInfo.tier === 'free'
+          ? 'Daily generation limit reached. Upgrade to Pro for more generations.'
+          : 'Daily generation limit reached. Your limit resets tomorrow.'
+      );
+      return;
+    }
+
     setIsGenerating(true);
     setStatusMessage(null);
     setJobStatus(null);
@@ -424,12 +438,19 @@ export const CampaignDetail: React.FC<CampaignDetailProps> = ({
       const jobId = await startGeneration(campaign.id);
       setActiveJobId(jobId);
       setStatusMessage('Pipeline started. Waiting for updates...');
-    } catch (error) {
+      onRefreshUsage?.();
+    } catch (error: any) {
       console.error('Failed to start generation:', error);
       setIsGenerating(false);
-      setStatusMessage('Generation failed. Please try again.');
+      const isQuotaError = error?.code === 'functions/resource-exhausted';
+      setStatusMessage(
+        isQuotaError
+          ? 'Daily generation limit reached. Upgrade to Pro for more generations.'
+          : 'Generation failed. Please try again.'
+      );
       // Remove placeholders on failure
       onUpdateContent(contentStore.filter(c => !c.id.startsWith('placeholder-')));
+      if (isQuotaError) onRefreshUsage?.();
     }
   };
 

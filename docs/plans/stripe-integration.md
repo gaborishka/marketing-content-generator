@@ -76,12 +76,12 @@ MarketGen AI needs tiered user management with usage limits. Currently: Firebase
 
 ### Phase 5: Frontend — Services & State
 
-- [ ] **5.1 Create `services/stripeService.ts`**
+- [x] **5.1 Create `services/stripeService.ts`**
   - `fetchUserProfileAndUsage()` — calls `getUserProfileAndUsage` Cloud Function
   - `openCheckout(priceId?)` — calls `createCheckoutSession`, redirects to Stripe
   - `openBillingPortal()` — calls `createPortalSession`, redirects to portal
 
-- [ ] **5.2 Add usage state to `App.tsx`**
+- [x] **5.2 Add usage state to `App.tsx`**
   - `useState<UsageInfo | null>(null)` for `usageInfo`
   - `useEffect` to fetch profile+usage after auth
   - `refreshUsage` callback

@@ -15,10 +15,13 @@ import {
 } from 'lucide-react';
 import { Link, useLocation } from 'react-router-dom';
 
+import { UsageInfo } from '../types';
+
 interface LayoutProps {
   children: React.ReactNode;
   onSignOut?: () => void;
   userName?: string;
+  usageInfo?: UsageInfo | null;
 }
 
 const SidebarItem = ({ icon: Icon, label, path, active }: { icon: any, label: string, path: string, active: boolean }) => (
@@ -35,7 +38,7 @@ const SidebarItem = ({ icon: Icon, label, path, active }: { icon: any, label: st
   </Link>
 );
 
-export const Layout: React.FC<LayoutProps> = ({ children, onSignOut, userName }) => {
+export const Layout: React.FC<LayoutProps> = ({ children, onSignOut, userName, usageInfo }) => {
   const location = useLocation();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const isCanvasRoute = (/^\/campaigns\/[^/]+$/.test(location.pathname) && location.pathname !== '/campaigns/new') || location.pathname.startsWith('/landing');
@@ -101,13 +104,43 @@ export const Layout: React.FC<LayoutProps> = ({ children, onSignOut, userName })
         </nav>
 
         <div className="absolute bottom-0 left-0 right-0 p-4 bg-slate-900 border-t border-slate-800">
+          {usageInfo && (
+            <div className="mb-3 px-2">
+              <div className="flex items-center justify-between mb-1.5">
+                <span className="text-[10px] font-semibold text-slate-400 uppercase">Usage Today</span>
+                <span className="text-[10px] text-slate-500">{usageInfo.generationCount}/{usageInfo.limit}</span>
+              </div>
+              <div className="w-full bg-slate-700 rounded-full h-1.5 overflow-hidden">
+                <div
+                  className={`h-1.5 rounded-full transition-all duration-300 ${
+                    usageInfo.generationCount >= usageInfo.limit
+                      ? 'bg-red-500'
+                      : usageInfo.generationCount >= usageInfo.limit * 0.8
+                        ? 'bg-amber-500'
+                        : 'bg-emerald-500'
+                  }`}
+                  style={{ width: `${Math.min(100, (usageInfo.generationCount / usageInfo.limit) * 100)}%` }}
+                />
+              </div>
+            </div>
+          )}
           <div className="flex items-center space-x-3 p-2 rounded-lg hover:bg-slate-800 cursor-pointer transition-colors">
             <div className="w-8 h-8 rounded-full bg-gradient-to-r from-emerald-400 to-cyan-500 flex items-center justify-center text-xs font-bold text-slate-900">
               {(userName || 'U').charAt(0).toUpperCase()}
             </div>
             <div className="flex-1">
               <p className="text-sm font-medium">{userName || 'User'}</p>
-              <p className="text-xs text-slate-400">Marketer Admin</p>
+              <p className="text-xs text-slate-400">
+                {usageInfo ? (
+                  <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold uppercase ${
+                    usageInfo.tier === 'pro'
+                      ? 'bg-gradient-to-r from-blue-500 to-purple-500 text-white'
+                      : 'bg-slate-700 text-slate-300'
+                  }`}>
+                    {usageInfo.tier}
+                  </span>
+                ) : 'Marketer Admin'}
+              </p>
             </div>
             <button onClick={onSignOut} title="Sign out">
               <LogOut size={16} className="text-slate-400 hover:text-white transition-colors" />
