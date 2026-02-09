@@ -137,6 +137,8 @@ export interface CampaignDoc {
   complianceRuleId?: string;
 }
 
+export type ProductSource = "internal" | "shopify";
+
 export interface ProductDoc {
   id: string;
   userId: string;
@@ -150,6 +152,19 @@ export interface ProductDoc {
   imageUrl: string;
   complianceFiles: string[];
   marketingTags: string[];
+  source: ProductSource;
+  shopifyProductId?: string;
+  shopifyHandle?: string;
+  lastSyncedAt?: string;
+}
+
+export interface ShopifyConnectionDoc {
+  userId: string;
+  shopDomain: string;
+  accessToken: string;
+  scope: string;
+  installedAt: string;
+  shopName?: string;
 }
 
 export interface ComplianceRuleDoc {

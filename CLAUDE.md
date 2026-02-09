@@ -131,3 +131,13 @@ All functions require authentication and use `GEMINI_API_KEY` via `defineSecret`
 - Test config: `functions/vitest.config.ts`
 - Mocking pattern: `vi.mock("../utils/gemini")`, `vi.mock("../utils/firestore")` etc. to isolate agents from Firebase/Gemini SDK
 - No frontend test runner is configured
+
+## Browser Automation
+
+Use `agent-browser` for web automation. Run `agent-browser --help` for all commands.
+
+Core workflow:
+1. `agent-browser open <url>` - Navigate to page
+2. `agent-browser snapshot -i` - Get interactive elements with refs (@e1, @e2)
+3. `agent-browser click @e1` / `fill @e2 "text"` - Interact using refs
+4. Re-snapshot after page changes
