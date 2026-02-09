@@ -5,7 +5,7 @@ import react from '@vitejs/plugin-react';
 export default defineConfig(({ mode }) => {
   // Load env file based on `mode` in the current working directory.
   // Load all env variables (not just VITE_ prefixed ones)
-  const env = loadEnv(mode, process.cwd(), '');
+  // const env = loadEnv(mode, process.cwd(), '');
   
   return {
     server: {
@@ -19,8 +19,8 @@ export default defineConfig(({ mode }) => {
       }
     },
     define: {
-      // Expose GEMINI_API_KEY to the frontend (without VITE_ prefix)
-      'import.meta.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY),
+      // API keys are now kept secure on the backend via Cloud Functions
+      // No need to expose GEMINI_API_KEY to the frontend
     }
   };
 });

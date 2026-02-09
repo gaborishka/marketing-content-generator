@@ -1495,3 +1495,326 @@ export const resyncShopifyProducts = onCall(
     return { synced, failed };
   }
 );
+
+// ── checkContentCompliance (Single Item) ────────────────────────────────────────
+// Frontend proxy for single content item compliance checking
+
+interface CheckContentComplianceInput {
+  contentText: string;
+  channel: string;
+  audience: string;
+  ruleText: string;
+  ruleName: string;
+}
+
+export const checkContentCompliance = onCall(
+  { timeoutSeconds: 120, memory: "512MiB", secrets: [GEMINI_API_KEY], cors: true },
+  async (request) => {
+    if (!request.auth) {
+      throw new HttpsError("unauthenticated", "Authentication required.");
+    }
+
+    const { contentText, channel, audience, ruleText, ruleName } = request.data as CheckContentComplianceInput;
+    
+    if (!contentText || !channel || !audience || !ruleText || !ruleName) {
+      throw new HttpsError("invalid-argument", "All fields are required.");
+    }
+
+    const ai = getAiClient();
+    const { buildCompliancePrompt, COMPLIANCE_RESPONSE_SCHEMA } = await import("./prompts/compliance.prompt");
+    const prompt = buildCompliancePrompt(contentText, channel, audience, ruleText, ruleName);
+
+    try {
+      const response = await ai.models.generateContent({
+        model: "gemini-3-flash-preview",
+        contents: prompt,
+        config: {
+          responseMimeType: "application/json",
+          maxOutputTokens: 2048,
+          responseSchema: COMPLIANCE_RESPONSE_SCHEMA,
+        },
+      });
+
+      const cleanText = (response.text || "{}")
+        .replace(/```json\n?|```/g, "")
+        .trim();
+
+      let raw: { score: number; pass: boolean; feedback: string; violations: string[]; suggestedFix?: string };
+      try {
+        raw = JSON.parse(cleanText);
+      } catch (parseError) {
+        throw new HttpsError("internal", "Failed to parse compliance evaluation response");
+      }
+
+      // Add +30 to AI-generated scores to make them less strict
+      const rawScore = (raw.score || 0) + 30;
+      const score = Math.max(0, Math.min(100, Math.round(rawScore)));
+      const pass = score >= 60; // Lowered threshold from 80 to 60 for less strict compliance
+
+      return {
+        contentId: "", // Will be set by caller
+        score,
+        pass,
+        feedback: raw.feedback || "",
+        violations: raw.violations || [],
+        suggestedFix: raw.suggestedFix,
+      };
+    } catch (error: any) {
+      if (error instanceof HttpsError) throw error;
+      console.error("checkContentCompliance error:", error);
+      throw new HttpsError("internal", error.message || "Compliance check failed.");
+    }
+  }
+);
+
+// ── generateImageFromImage (Image-to-Image Conversion) ──────────────────────────
+// Modifies an existing image based on a text prompt
+
+interface GenerateImageFromImageInput {
+  baseImageData: string; // Base64 image data (without data: URL prefix)
+  mimeType: string;
+  modificationPrompt: string;
+  aspectRatio?: "1:1" | "3:4" | "4:3" | "9:16" | "16:9";
+}
+
+export const generateImageFromImage = onCall(
+  { timeoutSeconds: 120, memory: "1GiB", secrets: [GEMINI_API_KEY], cors: true },
+  async (request) => {
+    if (!request.auth) {
+      throw new HttpsError("unauthenticated", "Authentication required.");
+    }
+
+    const uid = request.auth.uid;
+    const email = request.auth.token.email || "";
+    const displayName = request.auth.token.name || "";
+
+    const { baseImageData, mimeType, modificationPrompt, aspectRatio } = request.data as GenerateImageFromImageInput;
+    
+    if (!baseImageData || !mimeType || !modificationPrompt) {
+      throw new HttpsError("invalid-argument", "baseImageData, mimeType, and modificationPrompt are required.");
+    }
+
+    await enforceQuotaAndIncrement(uid, email, displayName);
+
+    const ai = getAiClient();
+    const fullPrompt = `Has to be added or changed: ${modificationPrompt}`;
+
+    try {
+      const response = await ai.models.generateContent({
+        model: "gemini-3-pro-image-preview",
+        contents: {
+          parts: [
+            {
+              inlineData: {
+                data: baseImageData,
+                mimeType: mimeType,
+              },
+            },
+            { text: fullPrompt },
+          ],
+        },
+        config: {
+          imageConfig: {
+            aspectRatio: aspectRatio || "16:9",
+            imageSize: "1K",
+          },
+        },
+      });
+
+      for (const part of response.candidates?.[0]?.content?.parts || []) {
+        if (part.inlineData) {
+          return {
+            mimeType: part.inlineData.mimeType,
+            data: part.inlineData.data,
+          };
+        }
+      }
+
+      throw new HttpsError("internal", "No image data in response.");
+    } catch (error: any) {
+      if (error instanceof HttpsError) throw error;
+      console.error("generateImageFromImage error:", error);
+      throw new HttpsError("internal", error.message || "Image-to-image conversion failed.");
+    }
+  }
+);
+
+// ── chatWithAIForContent (Content AI Assistant) ─────────────────────────────────
+// AI chat for content modification
+
+interface ChatWithAIForContentInput {
+  content: {
+    channel: string;
+    audience: string;
+    text: string;
+    headline?: string;
+    body?: string;
+    imageUrl?: string;
+  };
+  campaignContext?: {
+    name: string;
+    keyMessage: string;
+    audience: string;
+  };
+  messages: Array<{ role: 'user' | 'assistant'; content: string; timestamp?: string }>;
+}
+
+export const chatWithAIForContent = onCall(
+  { timeoutSeconds: 120, memory: "1GiB", secrets: [GEMINI_API_KEY], cors: true },
+  async (request) => {
+    if (!request.auth) {
+      throw new HttpsError("unauthenticated", "Authentication required.");
+    }
+
+    const { content, campaignContext, messages } = request.data as ChatWithAIForContentInput;
+    
+    if (!content || !messages || messages.length === 0) {
+      throw new HttpsError("invalid-argument", "content and messages are required.");
+    }
+
+    const ai = getAiClient();
+
+    // Build the prompt (similar to contentAIService.ts)
+    const contextPrompt = `You are an AI assistant helping to modify marketing content. 
+
+Current Content:
+- Channel: ${content.channel}
+- Audience: ${content.audience}
+- Current Text: ${content.text}
+${content.headline ? `- Headline: ${content.headline}` : ''}
+${content.body ? `- Body: ${content.body}` : ''}
+${content.imageUrl ? `- Has existing image: Yes` : `- Has existing image: No`}
+${campaignContext ? `
+Campaign Context:
+- Campaign Name: ${campaignContext.name}
+- Key Message: ${campaignContext.keyMessage}
+- Target Audience: ${campaignContext.audience}
+` : ''}
+
+Your role:
+1. Understand the user's modification request
+2. Identify which specific fields need to be updated (headline, body, text, or image)
+3. If the request is clear and actionable, update ONLY the requested fields (set shouldUpdate: true and list fields in updateFields array)
+4. If clarification is needed, ask follow-up questions (provide questions array)
+5. Always explain what you're doing in the message field
+
+CRITICAL RULES:
+- ONLY update the fields that the user explicitly requested
+- If user asks to update "body", ONLY update updatedBody - do NOT change headline or text
+- If user asks to update "headline", ONLY update updatedHeadline - do NOT change body or text
+- If user asks to modify/update/change the image (especially small details), provide imagePrompt in updateFields with 'image'
+  - If there's an existing image, the imagePrompt MUST be MINIMAL and describe ONLY what needs to change/add/remove (e.g., "woman walking across street wearing red sneakers", "change background to blue", "add text overlay")
+  - DO NOT describe the entire scene or composition when modifying existing images - only describe the specific change
+  - Keep it to 1-2 short sentences maximum, focusing on what's different from the current image
+  - If there's no existing image, the imagePrompt should describe the full image to generate
+- Preserve all other fields exactly as they are
+- Do NOT regenerate or modify fields that were not requested
+
+Guidelines:
+- Maintain the tone and style appropriate for ${content.channel}
+- Keep the content suitable for ${content.audience} audience
+- Preserve the core message while making requested changes
+- For text updates: if only headline OR body is requested, update that specific field. If both need to change, use updatedText
+- For image updates: 
+  - If existing image: keep the prompt MINIMAL - only describe what needs to change (e.g., "woman wearing red sneakers" or "change background to city street")
+  - If no existing image: create a detailed image prompt based on the content and user's request
+
+Respond in JSON format with the schema provided.`;
+
+    const CONTENT_MODIFICATION_SCHEMA = {
+      type: Type.OBJECT,
+      properties: {
+        message: { type: Type.STRING, description: "Response message to the user" },
+        shouldUpdate: { type: Type.BOOLEAN, description: "Whether to update the content automatically" },
+        updateFields: {
+          type: Type.ARRAY,
+          items: { type: Type.STRING },
+          description: "List of fields that should be updated: 'headline', 'body', 'text', 'image'"
+        },
+        updatedText: { type: Type.STRING, description: "Updated full text (if text field needs updating)" },
+        updatedHeadline: { type: Type.STRING, description: "Updated headline (if headline field needs updating)" },
+        updatedBody: { type: Type.STRING, description: "Updated body (if body field needs updating)" },
+        imagePrompt: { type: Type.STRING, description: "Image generation/modification prompt (if image needs updating)" },
+        questions: {
+          type: Type.ARRAY,
+          items: { type: Type.STRING },
+          description: "Follow-up questions if clarification is needed"
+        },
+        reasoning: { type: Type.STRING, description: "Brief explanation of the changes made" }
+      },
+      required: ["message"],
+    };
+
+    // Convert messages to Gemini format
+    const geminiMessages = messages.map(msg => ({
+      role: msg.role === 'user' ? 'user' : 'model',
+      parts: [{ text: msg.content }]
+    }));
+
+    try {
+      const response = await ai.models.generateContent({
+        model: "gemini-3-flash-preview",
+        contents: [
+          { role: 'user', parts: [{ text: contextPrompt }] },
+          ...geminiMessages
+        ],
+        config: {
+          responseMimeType: "application/json",
+          maxOutputTokens: 4096,
+          responseSchema: CONTENT_MODIFICATION_SCHEMA,
+        },
+      });
+
+      const cleanText = (response.text || "{}")
+        .replace(/```json\n?|```/g, "")
+        .trim();
+
+      let raw: any;
+      try {
+        raw = JSON.parse(cleanText);
+      } catch (parseError: any) {
+        // Try to extract JSON if it's wrapped in text
+        const jsonMatch = cleanText.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+          try {
+            raw = JSON.parse(jsonMatch[0]);
+          } catch {
+            throw new HttpsError("internal", "Failed to parse AI response");
+          }
+        } else {
+          throw new HttpsError("internal", "Failed to parse AI response");
+        }
+      }
+
+      // Process the response similar to contentAIService.ts
+      const result: any = {
+        message: raw.message || "",
+        shouldUpdate: raw.shouldUpdate || false,
+        updateFields: raw.updateFields || [],
+        questions: raw.questions || [],
+        updatedContent: {},
+      };
+
+      if (raw.shouldUpdate && raw.updateFields && Array.isArray(raw.updateFields)) {
+        if (raw.updateFields.includes('headline') && raw.updatedHeadline) {
+          result.updatedContent.headline = raw.updatedHeadline;
+        }
+        if (raw.updateFields.includes('body') && raw.updatedBody) {
+          result.updatedContent.body = raw.updatedBody;
+        }
+        if (raw.updateFields.includes('text') && raw.updatedText) {
+          result.updatedContent.text = raw.updatedText;
+        }
+        if (raw.updateFields.includes('image') && raw.imagePrompt) {
+          result.imagePrompt = raw.imagePrompt;
+        }
+      }
+
+      return result;
+    } catch (error: any) {
+      if (error instanceof HttpsError) throw error;
+      console.error("chatWithAIForContent error:", error);
+      throw new HttpsError("internal", error.message || "AI chat failed.");
+    }
+  }
+);
