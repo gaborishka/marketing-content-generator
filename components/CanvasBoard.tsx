@@ -17,6 +17,7 @@ interface CanvasBoardProps {
   onEdit?: (id: string) => void;
   onDelete?: (id: string) => void;
   onDoubleClick?: (id: string) => void;
+  onEditWithAI?: (id: string) => void;
   onCanvasDoubleClick?: (canvasPos: { x: number; y: number }) => void;
   onPasteOnCanvas?: (canvasPos: { x: number; y: number }, text?: string, imageDataUrl?: string) => void;
   pasteEnabled?: boolean;
@@ -28,7 +29,7 @@ const noopDelete = (_id: string) => {};
 
 export const INITIAL_CANVAS_SCALE = 0.8;
 
-export const CanvasBoard: React.FC<CanvasBoardProps> = ({ items, onItemsChange, onEdit, onDelete, onDoubleClick, onCanvasDoubleClick, onPasteOnCanvas, pasteEnabled = true, brandName, focusTarget }) => {
+export const CanvasBoard: React.FC<CanvasBoardProps> = ({ items, onItemsChange, onEdit, onDelete, onDoubleClick, onEditWithAI, onCanvasDoubleClick, onPasteOnCanvas, pasteEnabled = true, brandName, focusTarget }) => {
   const containerRef = useRef<HTMLDivElement>(null);
 
   // Viewport State
@@ -384,6 +385,7 @@ export const CanvasBoard: React.FC<CanvasBoardProps> = ({ items, onItemsChange, 
                 onEdit={handleEdit}
                 onDelete={onDelete || noopDelete}
                 onDoubleClick={onDoubleClick}
+                onEditWithAI={onEditWithAI}
               />
             );
           })}

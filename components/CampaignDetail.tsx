@@ -47,6 +47,7 @@ import { startGeneration, subscribeToJob, subscribeToContent, JobStatus } from '
 import { VideoStoryboardModal } from './VideoStoryboardModal';
 import { ContentDetailModal } from './ContentDetailModal';
 import { ContentCreationModal } from './ContentCreationModal';
+import { ContentAIAssistant } from './ContentAIAssistant';
 import { FilterPanel, ContentFilters, INITIAL_FILTERS } from './FilterPanel';
 
 interface CampaignDetailProps {
@@ -104,6 +105,7 @@ export const CampaignDetail: React.FC<CampaignDetailProps> = ({
   const [isGenerating, setIsGenerating] = useState(false);
   const [editingContentId, setEditingContentId] = useState<string | null>(null);
   const [detailContentId, setDetailContentId] = useState<string | null>(null);
+  const [aiAssistantContentId, setAiAssistantContentId] = useState<string | null>(null);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [canvasFocusTarget, setCanvasFocusTarget] = useState<{ x: number; y: number; timestamp: number } | null>(null);
   const [creationModal, setCreationModal] = useState<{
@@ -184,6 +186,7 @@ export const CampaignDetail: React.FC<CampaignDetailProps> = ({
   const campaignContent = contentStore.filter(c => c.campaignId === id);
   const activeEditingContent = contentStore.find(c => c.id === editingContentId);
   const activeDetailContent = contentStore.find(c => c.id === detailContentId);
+  const activeAIContent = contentStore.find(c => c.id === aiAssistantContentId);
 
   // Filtered content for the canvas
   const filteredContent = useMemo(() => {
@@ -1062,6 +1065,7 @@ export const CampaignDetail: React.FC<CampaignDetailProps> = ({
                 onEdit={(id) => setEditingContentId(id)}
                 onDelete={handleDeleteContent}
                 onDoubleClick={(id) => setDetailContentId(id)}
+                onEditWithAI={(id) => setAiAssistantContentId(id)}
                 onCanvasDoubleClick={handleCanvasDoubleClick}
                 onPasteOnCanvas={handlePasteOnCanvas}
                 pasteEnabled={!creationModal}
@@ -1087,6 +1091,17 @@ export const CampaignDetail: React.FC<CampaignDetailProps> = ({
           onSave={(updated) => {
             onUpdateItem(updated);
             setDetailContentId(null);
+          }}
+        />
+      )}
+
+      {activeAIContent && campaign && (
+        <ContentAIAssistant
+          content={activeAIContent}
+          campaign={campaign}
+          onClose={() => setAiAssistantContentId(null)}
+          onUpdate={(updated) => {
+            onUpdateItem(updated);
           }}
         />
       )}

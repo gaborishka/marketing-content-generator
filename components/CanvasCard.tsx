@@ -13,7 +13,8 @@ import {
   Play,
   Image as ImageIcon,
   Check,
-  Trash2
+  Trash2,
+  Sparkles
 } from 'lucide-react';
 import { GeneratedContent, getParentChannel } from '../types';
 import { TwitterPreview } from './previews/TwitterPreview';
@@ -31,6 +32,7 @@ interface CanvasCardProps {
   onEdit: (id: string) => void;
   onDelete: (id: string) => void;
   onDoubleClick?: (id: string) => void;
+  onEditWithAI?: (id: string) => void;
 }
 
 const CanvasCardInner: React.FC<CanvasCardProps> = ({
@@ -42,7 +44,8 @@ const CanvasCardInner: React.FC<CanvasCardProps> = ({
   onMouseDown,
   onEdit,
   onDelete,
-  onDoubleClick
+  onDoubleClick,
+  onEditWithAI
 }) => {
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -208,7 +211,7 @@ const CanvasCardInner: React.FC<CanvasCardProps> = ({
       }}
     >
       {/* Header */}
-      <div className="flex items-center justify-between p-3 border-b border-slate-100 bg-slate-50/50 rounded-t-xl cursor-grab active:cursor-grabbing">
+      <div className="flex items-center justify-between p-3 border-b border-slate-100 bg-slate-50/50 rounded-t-xl cursor-grab active:cursor-grabbing group">
         <div className="flex items-center space-x-2">
           {isVideoStoryboard ? (
             <div className="flex items-center space-x-1.5 px-2 py-0.5 bg-purple-100 text-purple-700 rounded-full text-[10px] font-bold uppercase tracking-wide">
@@ -231,13 +234,27 @@ const CanvasCardInner: React.FC<CanvasCardProps> = ({
         <div className="flex items-center space-x-1 relative" ref={menuRef}>
           {content.videoStatus === 'completed' && <div className="text-[10px] bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded font-medium">Ready</div>}
           <button
-            className="p-1 hover:bg-slate-200 rounded text-slate-400"
+            className="p-1.5 hover:bg-slate-200 rounded text-slate-500 hover:text-slate-700 transition-colors"
             onClick={(e) => { e.stopPropagation(); setMenuOpen(!menuOpen); }}
+            title="More options"
           >
-            <MoreHorizontal size={14} />
+            <MoreHorizontal size={16} />
           </button>
           {menuOpen && (
-            <div className="absolute right-0 top-full mt-1 bg-white border border-slate-200 rounded-lg shadow-lg py-1 z-50 min-w-[140px]">
+            <div className="absolute right-0 top-full mt-1 bg-white border border-slate-200 rounded-lg shadow-lg py-1 z-50 min-w-[160px]">
+              <button
+                className="w-full flex items-center space-x-2 px-3 py-1.5 text-xs text-blue-600 hover:bg-blue-50 transition-colors"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setMenuOpen(false);
+                  if (onEditWithAI) {
+                    onEditWithAI(content.id);
+                  }
+                }}
+              >
+                <Sparkles size={12} />
+                <span>Edit with AI</span>
+              </button>
               <button
                 className="w-full flex items-center space-x-2 px-3 py-1.5 text-xs text-red-600 hover:bg-red-50 transition-colors"
                 onClick={(e) => {
