@@ -16,6 +16,7 @@ import { Loader2 } from 'lucide-react';
 import * as storage from './services/storageService';
 import { uploadContentImages, isBase64DataUrl } from './services/fileStorage';
 import { AuthScreen } from './components/AuthScreen';
+import { MarketingLandingPage } from './components/MarketingLandingPage';
 import { onAuthChange, logOut } from './services/authService';
 import { getShopifyStatus, ShopifyStatus } from './services/shopifyService';
 import { fetchUserProfileAndUsage } from './services/stripeService';
@@ -472,7 +473,7 @@ function App() {
     }
   };
 
-  if (authLoading || isLoadingData) {
+  if (authLoading) {
     return (
       <div className="h-screen flex flex-col items-center justify-center bg-slate-50 text-slate-400">
         <Loader2 className="animate-spin mb-2" size={32} />
@@ -482,7 +483,24 @@ function App() {
   }
 
   if (!currentUser) {
-    return <AuthScreen />;
+    return (
+      <Router>
+        <Routes>
+          <Route path="/" element={<MarketingLandingPage />} />
+          <Route path="/auth" element={<AuthScreen />} />
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+      </Router>
+    );
+  }
+
+  if (isLoadingData) {
+    return (
+      <div className="h-screen flex flex-col items-center justify-center bg-slate-50 text-slate-400">
+        <Loader2 className="animate-spin mb-2" size={32} />
+        <span>Loading MarketGen AI...</span>
+      </div>
+    );
   }
 
   return (

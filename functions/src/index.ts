@@ -542,8 +542,8 @@ export const getUserProfileAndUsage = onCall(
 
 // ── Stripe Price IDs ──────────────────────────────────────────────────────
 // These should match the price IDs created in Stripe Dashboard.
-const STRIPE_PRICE_MONTHLY = "price_pro_monthly_29";
-const STRIPE_PRICE_YEARLY = "price_pro_yearly_290";
+const STRIPE_PRICE_MONTHLY = "price_1SytIoLBuAaEt1w5cwVG8pBB";
+const STRIPE_PRICE_YEARLY = "price_1SytIqLBuAaEt1w5mFKDKE7V";
 
 const getStripe = () => new Stripe(STRIPE_SECRET_KEY.value());
 
