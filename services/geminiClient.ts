@@ -244,3 +244,84 @@ export async function generateImage(
   }
 }
 
+// ── Image-to-Image Conversion ────────────────────────────────────────────────────
+// Modifies an existing image based on a text prompt (e.g., "change the color", "add text", etc.)
+
+export async function generateImageFromImage(
+  baseImageDataUrl: string,
+  modificationPrompt: string,
+  aspectRatio: "1:1" | "3:4" | "4:3" | "9:16" | "16:9" = "16:9"
+): Promise<string> {
+  console.log('[generateImageFromImage] Starting image-to-image conversion');
+  console.log('[generateImageFromImage] Modification prompt:', modificationPrompt);
+  console.log('[generateImageFromImage] Aspect ratio:', aspectRatio);
+  console.log('[generateImageFromImage] Base image format:', baseImageDataUrl.substring(0, 50) + '...');
+
+  const ai = getGeminiClient();
+
+  try {
+    // Parse the base64 data URL
+    const base64Match = baseImageDataUrl.match(/^data:image\/(\w+);base64,(.+)$/);
+    if (!base64Match) {
+      console.error('[generateImageFromImage] Invalid image data URL format');
+      throw new Error("Invalid image data URL format");
+    }
+
+    const [, mimeType, base64Data] = base64Match;
+    const validMimeType = mimeType === 'jpeg' ? 'image/jpeg' : `image/${mimeType}`;
+    const imageSizeBytes = Math.round((base64Data.length * 3) / 4);
+    console.log('[generateImageFromImage] Parsed image - MIME type:', validMimeType, 'Size:', `${(imageSizeBytes / 1024).toFixed(2)} KB`);
+
+    // Build the prompt for image modification
+    const fullPrompt = `Has to be added or changed: ${modificationPrompt}`;
+
+    console.log('[generateImageFromImage] Sending request to Gemini API...');
+    const startTime = Date.now();
+
+    const response = await ai.models.generateContent({
+      model: "gemini-3-pro-image-preview",
+      contents: {
+        parts: [
+          {
+            inlineData: {
+              data: base64Data,
+              mimeType: validMimeType,
+            },
+          },
+          { text: fullPrompt },
+        ],
+      },
+      config: {
+        imageConfig: {
+          aspectRatio,
+          imageSize: "1K",
+        },
+      },
+    });
+
+    const duration = Date.now() - startTime;
+    console.log('[generateImageFromImage] Received response from Gemini API in', `${duration}ms`);
+
+    for (const part of response.candidates?.[0]?.content?.parts || []) {
+      if (part.inlineData) {
+        const resultSizeBytes = Math.round((part.inlineData.data.length * 3) / 4);
+        console.log('[generateImageFromImage] ✅ Successfully converted image');
+        console.log('[generateImageFromImage] Result - MIME type:', part.inlineData.mimeType, 'Size:', `${(resultSizeBytes / 1024).toFixed(2)} KB`);
+        return `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`;
+      }
+    }
+
+    console.error('[generateImageFromImage] ❌ No image data in response');
+    throw new Error("No image data in response");
+  } catch (error: any) {
+    console.error('[generateImageFromImage] ❌ Image-to-image conversion error:', error);
+    console.error('[generateImageFromImage] Error details:', {
+      message: error.message,
+      stack: error.stack,
+      modificationPrompt,
+      aspectRatio
+    });
+    throw new Error(`Image modification failed: ${error.message || String(error)}`);
+  }
+}
+

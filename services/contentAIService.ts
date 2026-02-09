@@ -78,6 +78,7 @@ Current Content:
 - Current Text: ${content.text}
 ${content.headline ? `- Headline: ${content.headline}` : ''}
 ${content.body ? `- Body: ${content.body}` : ''}
+${content.imageUrl ? `- Has existing image: Yes` : `- Has existing image: No`}
 ${campaignContext ? `
 Campaign Context:
 - Campaign Name: ${campaignContext.name}
@@ -96,7 +97,11 @@ CRITICAL RULES:
 - ONLY update the fields that the user explicitly requested
 - If user asks to update "body", ONLY update updatedBody - do NOT change headline or text
 - If user asks to update "headline", ONLY update updatedHeadline - do NOT change body or text
-- If user asks to regenerate/update image, provide imagePrompt in updateFields with 'image'
+- If user asks to modify/update/change the image (especially small details), provide imagePrompt in updateFields with 'image'
+  - If there's an existing image, the imagePrompt MUST be MINIMAL and describe ONLY what needs to change/add/remove (e.g., "woman walking across street wearing red sneakers", "change background to blue", "add text overlay")
+  - DO NOT describe the entire scene or composition when modifying existing images - only describe the specific change
+  - Keep it to 1-2 short sentences maximum, focusing on what's different from the current image
+  - If there's no existing image, the imagePrompt should describe the full image to generate
 - Preserve all other fields exactly as they are
 - Do NOT regenerate or modify fields that were not requested
 
@@ -105,7 +110,9 @@ Guidelines:
 - Keep the content suitable for ${content.audience} audience
 - Preserve the core message while making requested changes
 - For text updates: if only headline OR body is requested, update that specific field. If both need to change, use updatedText
-- For image updates: create a detailed image prompt based on the content and user's request
+- For image updates: 
+  - If existing image: keep the prompt MINIMAL - only describe what needs to change (e.g., "woman wearing red sneakers" or "change background to city street")
+  - If no existing image: create a detailed image prompt based on the content and user's request
 
 Respond in JSON format with the schema provided.`;
 

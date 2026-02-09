@@ -69,25 +69,40 @@ async function processRegularContent(
   doc: ContentDoc,
   userId: string
 ): Promise<boolean> {
-  const prompt = buildImagePrompt(doc);
-  const aspectRatio = getAspectRatioForChannel(doc.channel);
-  const imageResult = await generateImage(prompt, aspectRatio);
+  try {
+    const prompt = buildImagePrompt(doc);
+    const aspectRatio = getAspectRatioForChannel(doc.channel);
+    const imageResult = await generateImage(prompt, aspectRatio);
 
-  if (!imageResult) {
+    if (!imageResult) {
+      return false;
+    }
+
+    // Try to upload to Storage, but fallback to base64 if Storage fails
+    try {
+      const imageBuffer = Buffer.from(imageResult.data, "base64");
+      const { downloadUrl } = await uploadImageToStorage(
+        userId,
+        doc.id,
+        imageBuffer,
+        imageResult.mimeType,
+        "hero.png"
+      );
+
+      await updateContentDoc(doc.id, { imageUrl: downloadUrl });
+    } catch (storageError: any) {
+      // Fallback: use base64 data URL (like AI chat does)
+      // This works even when Storage emulator isn't running or has auth issues
+      console.warn(`[AssetManager] Storage upload failed for content ${doc.id}, using base64 fallback:`, storageError.message);
+      const base64Url = `data:${imageResult.mimeType};base64,${imageResult.data}`;
+      await updateContentDoc(doc.id, { imageUrl: base64Url });
+    }
+    
+    return true;
+  } catch (error: any) {
+    console.error(`[AssetManager] Failed to process regular content ${doc.id}:`, error);
     return false;
   }
-
-  const imageBuffer = Buffer.from(imageResult.data, "base64");
-  const { downloadUrl } = await uploadImageToStorage(
-    userId,
-    doc.id,
-    imageBuffer,
-    imageResult.mimeType,
-    "hero.png"
-  );
-
-  await updateContentDoc(doc.id, { imageUrl: downloadUrl });
-  return true;
 }
 
 // ── Process a video storyboard content item (scene images) ──────────────────

@@ -66,6 +66,20 @@ const MOCK_PRODUCTS: Product[] = [
     complianceFiles: ['supplement-facts.pdf'],
     marketingTags: ['focus', 'students', 'professionals'],
     source: 'internal'
+  },
+  {
+    id: 'prod-5',
+    name: 'UrbanChunk Heritage',
+    sku: 'UCH-2024',
+    brand: 'UrbanChunk',
+    category: 'Footwear',
+    description: 'Premium chunky sneaker featuring a sculpted midsole, multi-toned neutral color palette, and contemporary streetwear design. Perfect blend of comfort and style.',
+    price: 149.99,
+    features: ['Sculpted midsole', 'Multi-toned design', 'Suede and synthetic leather', 'Comfortable fit', 'Streetwear aesthetic'],
+    imageUrl: 'https://images.unsplash.com/photo-1542291026-7eec264c27ff?auto=format&fit=crop&q=80&w=400',
+    complianceFiles: [],
+    marketingTags: ['fashion', 'streetwear', 'casual', 'comfort', 'trendy'],
+    source: 'internal'
   }
 ];
 
@@ -103,6 +117,23 @@ const MOCK_CAMPAIGNS: Campaign[] = [
     startDate: '2024-08-15',
     budget: 2000,
     progress: 10
+  },
+  {
+    id: 'c-4',
+    name: 'UrbanChunk Heritage Street Style',
+    description: 'Fashion-forward campaign for UrbanChunk Heritage chunky sneakers',
+    status: 'draft',
+    primaryProductId: 'prod-5',
+    secondaryProductIds: [],
+    context: 'Streetwear and fashion campaign targeting style-conscious consumers. Emphasize the chunky silhouette, neutral color palette, and versatile everyday wear. Focus on urban lifestyle, comfort, and contemporary fashion trends.',
+    attachments: ['style-guide.pdf', 'size-chart.pdf'],
+    targetAudiences: ['General Public', 'Students'],
+    channels: ['Instagram', 'TikTok', 'Twitter', 'Pinterest'],
+    languages: ['en'],
+    keyMessage: 'Step into style with UrbanChunk Heritage. Where comfort meets contemporary fashion. Neutral tones, chunky design, everyday versatility.',
+    startDate: '2024-10-01',
+    budget: 12000,
+    progress: 20
   }
 ];
 
@@ -151,6 +182,62 @@ const INITIAL_CONTENT: GeneratedContent[] = [
     y: 500,
     width: 320,
     connections: ['g-1']
+  },
+  {
+    id: 'g-8',
+    campaignId: 'c-4',
+    channel: 'Instagram Post',
+    audience: 'General Public',
+    text: 'Meet UrbanChunk Heritage 👟✨\n\nChunky silhouette meets neutral elegance. The perfect blend of comfort and contemporary style.\n\n✨ Sculpted midsole design\n✨ Multi-toned neutral palette\n✨ Premium suede and leather construction\n✨ Streetwear-ready aesthetic\n\nStep into everyday luxury. #UrbanChunk #ChunkySneakers #Streetwear #Fashion #SneakerHead',
+    complianceScore: 95,
+    riskLevel: 'low',
+    status: 'approved',
+    imageUrl: 'https://images.unsplash.com/photo-1542291026-7eec264c27ff?auto=format&fit=crop&q=80&w=800',
+    x: 100,
+    y: 100,
+    width: 320
+  },
+  {
+    id: 'g-9',
+    campaignId: 'c-4',
+    channel: 'TikTok Video',
+    audience: 'Students',
+    text: 'POV: You found the perfect chunky sneakers that go with everything 🎯\n\nUrbanChunk Heritage = neutral tones + chunky vibes + all-day comfort\n\nThese are giving ✨main character energy✨\n\n#ChunkySneakers #Streetwear #FashionTikTok #SneakerStyle #OOTD',
+    complianceScore: 90,
+    riskLevel: 'low',
+    status: 'approved',
+    imageUrl: 'https://images.unsplash.com/photo-1542291026-7eec264c27ff?auto=format&fit=crop&q=80&w=800',
+    x: 500,
+    y: 100,
+    width: 320
+  },
+  {
+    id: 'g-10',
+    campaignId: 'c-4',
+    channel: 'Twitter',
+    audience: 'General Public',
+    text: 'UrbanChunk Heritage: Where comfort meets contemporary style. 🚶‍♂️✨\n\nChunky design. Neutral tones. Everyday versatility.\n\n#UrbanChunk #Streetwear #Fashion',
+    complianceScore: 92,
+    riskLevel: 'low',
+    status: 'draft',
+    imageUrl: 'https://images.unsplash.com/photo-1542291026-7eec264c27ff?auto=format&fit=crop&q=80&w=800',
+    x: 100,
+    y: 500,
+    width: 320
+  },
+  {
+    id: 'g-11',
+    campaignId: 'c-4',
+    channel: 'Pinterest Pin',
+    audience: 'General Public',
+    text: 'UrbanChunk Heritage - Chunky Sneaker Style Guide\n\nNeutral tones meet contemporary design. Perfect for:\n• Casual everyday wear\n• Streetwear outfits\n• Comfort-focused styling\n\nShop the look: UrbanChunk Heritage in brown/beige/white\n\n#Streetwear #ChunkySneakers #FashionInspo #OOTD #SneakerStyle',
+    complianceScore: 94,
+    riskLevel: 'low',
+    status: 'draft',
+    imageUrl: 'https://images.unsplash.com/photo-1542291026-7eec264c27ff?auto=format&fit=crop&q=80&w=800',
+    x: 500,
+    y: 500,
+    width: 320
   }
 ];
 

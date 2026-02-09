@@ -16,7 +16,7 @@ import {
 } from 'lucide-react';
 import { GeneratedContent, Campaign } from '../types';
 import { chatWithAIForContent } from '../services/contentAIService';
-import { generateImage } from '../services/geminiClient';
+import { generateImage, generateImageFromImage } from '../services/geminiClient';
 import { getAspectRatioForChannel } from '../services/imageHelpers';
 import { saveContentChange } from '../services/contentHistoryService';
 import { RevealImage } from './RevealImage';
@@ -122,18 +122,79 @@ export const ContentAIAssistant: React.FC<ContentAIAssistantProps> = ({
           }
         }
         
-        // Handle image generation if requested
+        // Handle image generation/modification if requested
         if (response.updateFields?.includes('image') && response.imagePrompt) {
           setIsLoading(true);
           try {
             const aspectRatio = getAspectRatioForChannel(displayContent.channel);
-            const generatedImage = await generateImage(response.imagePrompt, aspectRatio);
+            let generatedImage: string;
+            
+            // Simplify prompt if it's too detailed (for image-to-image, we want minimal changes)
+            const simplifyPrompt = (prompt: string): string => {
+              // If prompt is very long (more than 100 chars) and contains scene descriptions, extract key changes
+              if (prompt.length > 100) {
+                // Try to extract the main subject/change from the prompt
+                // Look for patterns like "woman wearing", "change to", "add", etc.
+                const sentences = prompt.split(/[.!?]\s+/);
+                // Take the first sentence or the one with key action words
+                const keySentence = sentences.find(s => 
+                  /(wear|wearing|change|add|remove|make|show|replace)/i.test(s)
+                ) || sentences[0];
+                return keySentence.trim();
+              }
+              return prompt;
+            };
+            
+            // Use image-to-image if there's an existing image, otherwise generate new
+            if (displayContent.imageUrl && displayContent.imageUrl.startsWith('data:image/')) {
+              // Existing image is a base64 data URL - use image-to-image conversion
+              const simplifiedPrompt = simplifyPrompt(response.imagePrompt);
+              console.log('[ContentAIAssistant] Using image-to-image conversion (base64 data URL)');
+              console.log('[ContentAIAssistant] Original prompt length:', response.imagePrompt.length, 'Simplified:', simplifiedPrompt);
+              generatedImage = await generateImageFromImage(
+                displayContent.imageUrl,
+                simplifiedPrompt,
+                aspectRatio
+              );
+            } else if (displayContent.imageUrl) {
+              // Existing image is a URL - fetch it first, then convert
+              console.log('[ContentAIAssistant] Fetching existing image from URL for image-to-image conversion:', displayContent.imageUrl);
+              try {
+                const imageResponse = await fetch(displayContent.imageUrl);
+                const blob = await imageResponse.blob();
+                const reader = new FileReader();
+                const base64Image = await new Promise<string>((resolve, reject) => {
+                  reader.onloadend = () => resolve(reader.result as string);
+                  reader.onerror = reject;
+                  reader.readAsDataURL(blob);
+                });
+                const simplifiedPrompt = simplifyPrompt(response.imagePrompt);
+                console.log('[ContentAIAssistant] Successfully fetched and converted image to base64, using image-to-image conversion');
+                console.log('[ContentAIAssistant] Original prompt length:', response.imagePrompt.length, 'Simplified:', simplifiedPrompt);
+                generatedImage = await generateImageFromImage(
+                  base64Image,
+                  simplifiedPrompt,
+                  aspectRatio
+                );
+              } catch (fetchError) {
+                // If fetching fails, fall back to generating a new image
+                console.warn('[ContentAIAssistant] Failed to fetch existing image, falling back to new image generation:', fetchError);
+                generatedImage = await generateImage(response.imagePrompt, aspectRatio);
+              }
+            } else {
+              // No existing image - generate new one
+              console.log('[ContentAIAssistant] No existing image found, generating new image from scratch');
+              generatedImage = await generateImage(response.imagePrompt, aspectRatio);
+            }
+            
+            console.log('[ContentAIAssistant] ✅ Image processing completed successfully');
             newChanges.imageUrl = generatedImage;
             newChangedFields.add('image');
           } catch (imageError: any) {
+            console.error('[ContentAIAssistant] ❌ Image processing error:', imageError);
             const imageErrorMessage: ChatMessage = {
               role: 'assistant',
-              content: `I tried to generate a new image, but encountered an error: ${imageError.message || 'Unknown error'}. The text changes are still available to apply.`,
+              content: `I tried to ${displayContent.imageUrl ? 'modify' : 'generate'} the image, but encountered an error: ${imageError.message || 'Unknown error'}. The text changes are still available to apply.`,
               timestamp: new Date()
             };
             setMessages(prev => [...prev, imageErrorMessage]);
