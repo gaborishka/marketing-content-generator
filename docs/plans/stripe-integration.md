@@ -12,13 +12,13 @@ MarketGen AI needs tiered user management with usage limits. Currently: Firebase
 
 ### Phase 1: Types & Backend Utilities
 
-- [ ] **1.1 Add user/billing types to `types.ts`** (frontend)
+- [x] **1.1 Add user/billing types to `types.ts`** (frontend)
   - `UserTier`, `UserProfile`, `UsageInfo`, `TIER_LIMITS` constant
 
-- [ ] **1.2 Add user/billing types to `functions/src/types/pipeline.ts`** (backend)
+- [x] **1.2 Add user/billing types to `functions/src/types/pipeline.ts`** (backend)
   - `UserTier`, `UserProfileDoc`, `DailyUsageDoc`, `TIER_LIMITS` constant
 
-- [ ] **1.3 Create `functions/src/utils/billing.ts`**
+- [x] **1.3 Create `functions/src/utils/billing.ts`**
   - `getOrCreateUserProfile(uid, email, displayName)` — lazy profile creation in `users/{uid}`
   - `getUserProfile(uid)` — read profile
   - `updateUserProfile(uid, fields)` — partial update
@@ -28,7 +28,7 @@ MarketGen AI needs tiered user management with usage limits. Currently: Firebase
   - `findUidByCustomerId(customerId)` — reverse lookup for webhooks
   - Export `STRIPE_SECRET_KEY` and `STRIPE_WEBHOOK_SECRET` via `defineSecret`
 
-- [ ] **1.4 Install Stripe dependency** — `cd functions && npm install stripe`
+- [x] **1.4 Install Stripe dependency** — `cd functions && npm install stripe`
 
 ### Phase 2: Quota Enforcement in Cloud Functions
 
