@@ -152,36 +152,61 @@ export async function checkMultipleContentCompliance(
   ruleText: string,
   ruleName: string
 ): Promise<ComplianceCheckResult[]> {
+  console.log('[checkMultipleContentCompliance] Starting compliance check for', items.length, 'items');
+  console.log('[checkMultipleContentCompliance] Rule:', ruleName);
+  console.log('[checkMultipleContentCompliance] Items:', items.map(item => ({
+    id: item.id,
+    textPreview: item.text?.substring(0, 50) + '...',
+    textLength: item.text?.length || 0,
+    channel: item.channel,
+    audience: item.audience,
+  })));
+
   // Check items in parallel (with reasonable concurrency limit)
   const BATCH_SIZE = 5;
   const results: ComplianceCheckResult[] = [];
 
   for (let i = 0; i < items.length; i += BATCH_SIZE) {
     const batch = items.slice(i, i + BATCH_SIZE);
+    console.log(`[checkMultipleContentCompliance] Processing batch ${Math.floor(i / BATCH_SIZE) + 1}, items ${i + 1}-${Math.min(i + BATCH_SIZE, items.length)}`);
+    
     const batchResults = await Promise.allSettled(
-      batch.map(item =>
-        checkContentCompliance(item.text, item.channel, item.audience, ruleText, ruleName)
-          .then(result => ({ ...result, contentId: item.id }))
-      )
+      batch.map((item, index) => {
+        console.log(`[checkMultipleContentCompliance] Checking item ${item.id}...`);
+        return checkContentCompliance(item.text, item.channel, item.audience, ruleText, ruleName)
+          .then(result => {
+            console.log(`[checkMultipleContentCompliance] ✅ Item ${item.id} - Score: ${result.score}, Pass: ${result.pass}`);
+            return { ...result, contentId: item.id };
+          })
+          .catch(error => {
+            console.error(`[checkMultipleContentCompliance] ❌ Item ${item.id} failed:`, error);
+            // Return error result that will be caught by Promise.allSettled
+            throw { item, error };
+          });
+      })
     );
 
-    for (const result of batchResults) {
+    for (let j = 0; j < batchResults.length; j++) {
+      const result = batchResults[j];
       if (result.status === "fulfilled") {
         results.push(result.value);
       } else {
-        // Handle failed checks
-        const item = batch[batchResults.indexOf(result)];
+        // Handle failed checks - get the item from the batch using the index
+        const item = batch[j];
+        const error = result.reason?.error || result.reason;
+        console.error(`[checkMultipleContentCompliance] ❌ Compliance check failed for item ${item.id}:`, error);
         results.push({
           contentId: item.id,
           score: 0,
           pass: false,
-          feedback: "Compliance evaluation failed for this item",
+          feedback: `Compliance evaluation failed: ${error?.message || 'Unknown error'}`,
           violations: ["Evaluation API error"],
         });
       }
     }
   }
 
+  console.log('[checkMultipleContentCompliance] Completed. Results:', results.length, 'items checked');
   return results;
 }
 

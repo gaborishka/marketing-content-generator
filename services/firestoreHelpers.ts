@@ -35,6 +35,13 @@ export async function getContentByIds(
     throw new Error('User not authenticated');
   }
 
+  if (!contentIds || contentIds.length === 0) {
+    console.warn('[getContentByIds] No content IDs provided');
+    return [];
+  }
+
+  console.log('[getContentByIds] Fetching', contentIds.length, 'content items:', contentIds);
+
   const contentRef = collection(db, 'content');
   const results: GeneratedContent[] = [];
 
@@ -50,13 +57,19 @@ export async function getContentByIds(
             id: docSnap.id,
             ...data,
           } as GeneratedContent);
+          console.log(`[getContentByIds] ✅ Fetched content ${contentId}`);
+        } else {
+          console.warn(`[getContentByIds] ⚠️ Content ${contentId} belongs to different user`);
         }
+      } else {
+        console.warn(`[getContentByIds] ⚠️ Content ${contentId} does not exist`);
       }
     } catch (error) {
-      console.warn(`Failed to fetch content ${contentId}:`, error);
+      console.error(`[getContentByIds] ❌ Failed to fetch content ${contentId}:`, error);
     }
   }
 
+  console.log('[getContentByIds] Successfully fetched', results.length, 'out of', contentIds.length, 'items');
   return results;
 }
 

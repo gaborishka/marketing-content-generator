@@ -61,13 +61,26 @@ export const ComplianceChecker: React.FC<ComplianceCheckerProps> = ({
 
       const selectedCampaign = campaigns.find(c => c.id === selectedCampaignId);
       
+      // Prepare options based on check mode
+      const options: { campaignId?: string; campaignName?: string; contentIds?: string[] } = {};
+      
+      if (checkMode === 'campaign') {
+        // Campaign mode: only pass campaignId, no contentIds
+        options.campaignId = selectedCampaignId;
+        options.campaignName = selectedCampaign?.name;
+      } else {
+        // Content mode: pass both campaignId (for context) and selected contentIds
+        options.campaignId = selectedCampaignId;
+        options.campaignName = selectedCampaign?.name;
+        options.contentIds = Array.from(selectedContentIds);
+      }
+
+      console.log('[ComplianceChecker] Check mode:', checkMode);
+      console.log('[ComplianceChecker] Options:', options);
+
       const response = await checkCompliance(
         selectedRuleId,
-        {
-          campaignId: selectedCampaignId,
-          campaignName: selectedCampaign?.name,
-          contentIds: checkMode === 'content' ? Array.from(selectedContentIds) : undefined,
-        },
+        options,
         selectedRule.ruleText,
         selectedRule.name
       );

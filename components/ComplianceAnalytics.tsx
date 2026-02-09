@@ -37,7 +37,17 @@ export const ComplianceAnalytics: React.FC<ComplianceAnalyticsProps> = ({ rules,
     }
   };
 
-  const filteredChecks = complianceChecks.filter(check => {
+  // Separate individual content checks from campaign-level checks
+  const individualChecks = complianceChecks.filter(check => check.checkType === 'content');
+  const campaignChecks = complianceChecks.filter(check => check.checkType === 'campaign');
+
+  const filteredIndividualChecks = individualChecks.filter(check => {
+    if (selectedRuleId !== 'all' && check.ruleId !== selectedRuleId) return false;
+    if (selectedCampaignId !== 'all' && check.campaignId !== selectedCampaignId) return false;
+    return true;
+  });
+
+  const filteredCampaignChecks = campaignChecks.filter(check => {
     if (selectedRuleId !== 'all' && check.ruleId !== selectedRuleId) return false;
     if (selectedCampaignId !== 'all' && check.campaignId !== selectedCampaignId) return false;
     return true;
@@ -50,11 +60,11 @@ export const ComplianceAnalytics: React.FC<ComplianceAnalyticsProps> = ({ rules,
   });
 
   // Calculate summary statistics
-  const totalChecks = filteredChecks.length;
+  const totalChecks = filteredIndividualChecks.length + filteredCampaignChecks.length;
   const totalAnalytics = filteredAnalytics.length;
-  const totalItemsChecked = filteredChecks.reduce((sum, c) => sum + c.total, 0);
-  const totalPassed = filteredChecks.reduce((sum, c) => sum + c.passed, 0);
-  const totalFailed = filteredChecks.reduce((sum, c) => sum + c.failed, 0);
+  const totalItemsChecked = [...filteredIndividualChecks, ...filteredCampaignChecks].reduce((sum, c) => sum + c.total, 0);
+  const totalPassed = [...filteredIndividualChecks, ...filteredCampaignChecks].reduce((sum, c) => sum + c.passed, 0);
+  const totalFailed = [...filteredIndividualChecks, ...filteredCampaignChecks].reduce((sum, c) => sum + c.failed, 0);
   const overallPassRate = totalItemsChecked > 0 
     ? Math.round((totalPassed / totalItemsChecked) * 100) 
     : 0;
@@ -172,15 +182,75 @@ export const ComplianceAnalytics: React.FC<ComplianceAnalyticsProps> = ({ rules,
         </div>
       </div>
 
-      {/* Individual Compliance Checks */}
-      {(selectedFilter === 'all' || selectedFilter === 'checks') && filteredChecks.length > 0 && (
+      {/* Campaign-Level Compliance Checks */}
+      {(selectedFilter === 'all' || selectedFilter === 'checks') && filteredCampaignChecks.length > 0 && (
         <div className="bg-white rounded-lg border border-slate-200">
           <div className="p-4 border-b border-slate-200">
-            <h2 className="text-lg font-semibold text-slate-900">Individual Compliance Checks</h2>
-            <p className="text-sm text-slate-600 mt-1">{filteredChecks.length} check(s) found</p>
+            <h2 className="text-lg font-semibold text-slate-900">Campaign Compliance Checks</h2>
+            <p className="text-sm text-slate-600 mt-1">{filteredCampaignChecks.length} campaign check(s) found</p>
           </div>
           <div className="divide-y divide-slate-200">
-            {filteredChecks.map(check => {
+            {filteredCampaignChecks.map(check => {
+              const rule = rules.find(r => r.id === check.ruleId);
+              const campaign = campaigns.find(c => c.id === check.campaignId);
+              const passRate = check.total > 0 ? Math.round((check.passed / check.total) * 100) : 0;
+
+              return (
+                <div key={check.id} className="p-4 hover:bg-slate-50 transition-colors">
+                  <div className="flex items-start justify-between">
+                    <div className="flex-1">
+                      <div className="flex items-center space-x-2 mb-2">
+                        <span className="font-semibold text-slate-900">{check.ruleName}</span>
+                        <span className="text-xs px-2 py-1 bg-blue-100 text-blue-700 rounded">
+                          Campaign Check
+                        </span>
+                      </div>
+                      {campaign && (
+                        <p className="text-sm text-slate-600 mb-2">Campaign: {campaign.name}</p>
+                      )}
+                      <div className="flex items-center space-x-4 text-sm">
+                        <span className="text-slate-600">
+                          <Calendar size={14} className="inline mr-1" />
+                          {new Date(check.checkedAt).toLocaleDateString()}
+                        </span>
+                        <span className="text-slate-600">
+                          {check.total} item(s) checked
+                        </span>
+                      </div>
+                    </div>
+                    <div className="flex items-center space-x-4">
+                      <div className="text-right">
+                        <div className="flex items-center space-x-2">
+                          <CheckCircle className="text-green-600" size={18} />
+                          <span className="font-semibold text-green-600">{check.passed}</span>
+                        </div>
+                        <div className="flex items-center space-x-2 mt-1">
+                          <XCircle className="text-red-600" size={18} />
+                          <span className="font-semibold text-red-600">{check.failed}</span>
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-lg font-bold text-slate-900">{passRate}%</p>
+                        <p className="text-xs text-slate-500">Pass Rate</p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Individual Content Compliance Checks */}
+      {(selectedFilter === 'all' || selectedFilter === 'checks') && filteredIndividualChecks.length > 0 && (
+        <div className="bg-white rounded-lg border border-slate-200">
+          <div className="p-4 border-b border-slate-200">
+            <h2 className="text-lg font-semibold text-slate-900">Individual Content Checks</h2>
+            <p className="text-sm text-slate-600 mt-1">{filteredIndividualChecks.length} check(s) found</p>
+          </div>
+          <div className="divide-y divide-slate-200">
+            {filteredIndividualChecks.map(check => {
               const rule = rules.find(r => r.id === check.ruleId);
               const campaign = campaigns.find(c => c.id === check.campaignId);
               const passRate = check.total > 0 ? Math.round((check.passed / check.total) * 100) : 0;
@@ -298,7 +368,7 @@ export const ComplianceAnalytics: React.FC<ComplianceAnalyticsProps> = ({ rules,
       )}
 
       {/* Empty State */}
-      {filteredChecks.length === 0 && filteredAnalytics.length === 0 && (
+      {filteredIndividualChecks.length === 0 && filteredCampaignChecks.length === 0 && filteredAnalytics.length === 0 && (
         <div className="bg-white rounded-lg border border-slate-200 p-12 text-center">
           <BarChart3 className="mx-auto text-slate-400 mb-4" size={48} />
           <h3 className="text-lg font-semibold text-slate-900 mb-2">No Analytics Data</h3>
