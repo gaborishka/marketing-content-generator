@@ -40,7 +40,7 @@ export async function getOrCreateUserProfile(
     updatedAt: now,
   };
 
-  await ref.set(profile);
+  await ref.set(profile, { merge: true });
 
   // Re-read to get resolved timestamps
   const created = await ref.get();
@@ -129,5 +129,5 @@ export async function findUidByCustomerId(customerId: string): Promise<string | 
     .get();
 
   if (snap.empty) return null;
-  return snap.docs[0].data().uid as string;
+  return snap.docs[0].id;
 }

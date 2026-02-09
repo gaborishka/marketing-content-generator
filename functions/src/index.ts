@@ -107,13 +107,13 @@ export const generateContent = onCall(
     const email = request.auth.token.email || "";
     const displayName = request.auth.token.name || "";
 
-    await enforceQuota(uid, email, displayName);
-    await incrementUsage(uid);
-
     const { prompt, responseSchema } = request.data as GenerateContentInput;
     if (!prompt) {
       throw new HttpsError("invalid-argument", "prompt is required.");
     }
+
+    await enforceQuota(uid, email, displayName);
+    await incrementUsage(uid);
 
     const ai = getAiClient();
 
@@ -149,13 +149,13 @@ export const generateImage = onCall(
     const email = request.auth.token.email || "";
     const displayName = request.auth.token.name || "";
 
-    await enforceQuota(uid, email, displayName);
-    await incrementUsage(uid);
-
     const { prompt, aspectRatio } = request.data as GenerateImageInput;
     if (!prompt) {
       throw new HttpsError("invalid-argument", "prompt is required.");
     }
+
+    await enforceQuota(uid, email, displayName);
+    await incrementUsage(uid);
 
     const ai = getAiClient();
 
@@ -256,12 +256,9 @@ export const generateVideo = onCall(
       throw new HttpsError("unauthenticated", "Authentication required.");
     }
 
-    const uid = request.auth!.uid;
-    const email = request.auth!.token.email || "";
-    const displayName = request.auth!.token.name || "";
-
-    await enforceQuota(uid, email, displayName);
-    await incrementUsage(uid);
+    const uid = request.auth.uid;
+    const email = request.auth.token.email || "";
+    const displayName = request.auth.token.name || "";
 
     const { referenceImages, prompt, contentId } = request.data as GenerateVideoInput;
     if (!referenceImages || referenceImages.length === 0) {
@@ -270,6 +267,9 @@ export const generateVideo = onCall(
     if (!contentId || typeof contentId !== "string") {
       throw new HttpsError("invalid-argument", "contentId is required.");
     }
+
+    await enforceQuota(uid, email, displayName);
+    await incrementUsage(uid);
 
     // Resolve any URL-based reference images server-side
     const resolvedImages = await Promise.all(referenceImages.map(resolveReferenceImage));
@@ -325,7 +325,6 @@ export const generateVideo = onCall(
       unlink(tmpPath).catch(() => {});
 
       // Upload to Firebase Storage
-      const uid = request.auth!.uid;
       const filePath = `users/${uid}/content/${contentId}/video.mp4`;
       const bucket = getStorage().bucket();
       const file = bucket.file(filePath);
@@ -369,13 +368,13 @@ export const generateLandingPage = onCall(
     const email = request.auth.token.email || "";
     const displayName = request.auth.token.name || "";
 
-    await enforceQuota(uid, email, displayName);
-    await incrementUsage(uid);
-
     const { conversationHistory, currentHtml } = request.data as GenerateLandingPageInput;
     if (!conversationHistory || conversationHistory.length === 0) {
       throw new HttpsError("invalid-argument", "conversationHistory is required.");
     }
+
+    await enforceQuota(uid, email, displayName);
+    await incrementUsage(uid);
 
     const ai = getAiClient();
 
@@ -422,13 +421,13 @@ export const generateCampaignContent = onCall(
     const email = request.auth.token.email || "";
     const displayName = request.auth.token.name || "";
 
-    await enforceQuota(userId, email, displayName);
-    await incrementUsage(userId);
-
     const { campaignId } = request.data as GenerateCampaignInput;
     if (!campaignId || typeof campaignId !== "string") {
       throw new HttpsError("invalid-argument", "campaignId is required.");
     }
+
+    await enforceQuota(userId, email, displayName);
+    await incrementUsage(userId);
 
     const jobId = `job-${randomUUID()}`;
 
@@ -675,6 +674,10 @@ export const stripeWebhook = onRequest(
               stripeSubscriptionId: subscriptionId,
               stripeSubscriptionStatus: "active",
             });
+          } else if (!uid) {
+            console.error(`checkout.session.completed: no user found for Stripe customer ${customerId}`);
+          } else if (!subscriptionId) {
+            console.error(`checkout.session.completed: no subscription ID in session for customer ${customerId} (uid: ${uid})`);
           }
           break;
         }
@@ -692,6 +695,8 @@ export const stripeWebhook = onRequest(
               stripeSubscriptionId: subscription.id,
               stripeSubscriptionStatus: status,
             });
+          } else {
+            console.error(`customer.subscription.updated: no user found for Stripe customer ${customerId}`);
           }
           break;
         }
@@ -710,6 +715,8 @@ export const stripeWebhook = onRequest(
               stripeSubscriptionStatus: "canceled",
               updatedAt: FieldValue.serverTimestamp(),
             });
+          } else {
+            console.error(`customer.subscription.deleted: no user found for Stripe customer ${customerId}`);
           }
           break;
         }
@@ -720,7 +727,10 @@ export const stripeWebhook = onRequest(
       }
     } catch (err: any) {
       console.error(`Error processing webhook event ${event.id}:`, err);
-      // Don't delete the idempotency record — we still want to prevent re-processing
+      // Delete idempotency record so Stripe can retry this event
+      try { await eventRef.delete(); } catch (delErr) {
+        console.error(`Failed to delete idempotency record for ${event.id}:`, delErr);
+      }
       res.status(500).send("Webhook processing error");
       return;
     }

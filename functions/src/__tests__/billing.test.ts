@@ -137,7 +137,8 @@ describe("Billing Utils", () => {
           email: "new@example.com",
           displayName: "New User",
           tier: "free",
-        })
+        }),
+        { merge: true }
       );
       expect(result.tier).toBe("free");
       expect(result.uid).toBe("user-2");
@@ -333,7 +334,7 @@ describe("Billing Utils", () => {
         limit: vi.fn().mockReturnValue({
           get: vi.fn().mockResolvedValue({
             empty: false,
-            docs: [{ data: () => ({ uid: "user-1", stripeCustomerId: "cus_123" }) }],
+            docs: [{ id: "user-1", data: () => ({ uid: "user-1", stripeCustomerId: "cus_123" }) }],
           }),
         }),
       });

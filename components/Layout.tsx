@@ -119,7 +119,7 @@ export const Layout: React.FC<LayoutProps> = ({ children, onSignOut, userName, u
                         ? 'bg-amber-500'
                         : 'bg-emerald-500'
                   }`}
-                  style={{ width: `${Math.min(100, (usageInfo.generationCount / usageInfo.limit) * 100)}%` }}
+                  style={{ width: `${usageInfo.limit > 0 ? Math.min(100, (usageInfo.generationCount / usageInfo.limit) * 100) : 0}%` }}
                 />
               </div>
             </div>

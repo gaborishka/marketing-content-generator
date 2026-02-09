@@ -170,7 +170,7 @@ async function processWebhookEvent(eventType: string, eventData: any, eventId: s
 
       if (uid) {
         const status = eventData.status;
-        const tier: UserTier = status === "active" ? "pro" : "free";
+        const tier: UserTier = (status === "active" || status === "trialing") ? "pro" : "free";
         await updateUserProfile(uid, {
           tier,
           stripeSubscriptionId: eventData.id,
@@ -400,7 +400,7 @@ describe("stripeWebhook", () => {
         limit: vi.fn().mockReturnValue({
           get: vi.fn().mockResolvedValue({
             empty: false,
-            docs: [{ data: () => ({ uid: "user-1", stripeCustomerId: "cus_checkout" }) }],
+            docs: [{ id: "user-1", data: () => ({ uid: "user-1", stripeCustomerId: "cus_checkout" }) }],
           }),
         }),
       });
@@ -441,7 +441,7 @@ describe("stripeWebhook", () => {
         limit: vi.fn().mockReturnValue({
           get: vi.fn().mockResolvedValue({
             empty: false,
-            docs: [{ data: () => ({ uid: "user-1", stripeCustomerId: "cus_sub" }) }],
+            docs: [{ id: "user-1", data: () => ({ uid: "user-1", stripeCustomerId: "cus_sub" }) }],
           }),
         }),
       });
@@ -467,7 +467,7 @@ describe("stripeWebhook", () => {
         limit: vi.fn().mockReturnValue({
           get: vi.fn().mockResolvedValue({
             empty: false,
-            docs: [{ data: () => ({ uid: "user-1", stripeCustomerId: "cus_pastdue" }) }],
+            docs: [{ id: "user-1", data: () => ({ uid: "user-1", stripeCustomerId: "cus_pastdue" }) }],
           }),
         }),
       });
@@ -493,7 +493,7 @@ describe("stripeWebhook", () => {
         limit: vi.fn().mockReturnValue({
           get: vi.fn().mockResolvedValue({
             empty: false,
-            docs: [{ data: () => ({ uid: "user-1", stripeCustomerId: "cus_cancel" }) }],
+            docs: [{ id: "user-1", data: () => ({ uid: "user-1", stripeCustomerId: "cus_cancel" }) }],
           }),
         }),
       });
@@ -521,7 +521,7 @@ describe("stripeWebhook", () => {
         limit: vi.fn().mockReturnValue({
           get: vi.fn().mockResolvedValue({
             empty: false,
-            docs: [{ data: () => ({ uid: "user-1", stripeCustomerId: "cus_del" }) }],
+            docs: [{ id: "user-1", data: () => ({ uid: "user-1", stripeCustomerId: "cus_del" }) }],
           }),
         }),
       });
