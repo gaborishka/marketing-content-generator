@@ -10,6 +10,7 @@ import { CampaignDetail } from './components/CampaignDetail';
 import { ComplianceRules } from './components/ComplianceRules';
 import { BrandManager } from './components/BrandManager';
 import { LandingPageGenerator } from './components/LandingPageGenerator';
+import { Settings } from './components/Settings';
 import { Product, Campaign, GeneratedContent, ComplianceRule, Brand, LandingPageProject, UsageInfo } from './types';
 import { Loader2 } from 'lucide-react';
 import * as storage from './services/storageService';
@@ -553,6 +554,15 @@ function App() {
                 landingPages={landingPages}
                 onSave={handleLandingPageSave}
                 onDelete={handleLandingPageDelete}
+              />
+            }
+          />
+          <Route
+            path="/settings"
+            element={
+              <Settings
+                usageInfo={usageInfo}
+                onRefreshUsage={refreshUsage}
               />
             }
           />

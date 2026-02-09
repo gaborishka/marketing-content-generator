@@ -89,26 +89,26 @@ MarketGen AI needs tiered user management with usage limits. Currently: Firebase
 
 ### Phase 6: Frontend — UI Components
 
-- [ ] **6.1 Update `components/Layout.tsx`**
+- [x] **6.1 Update `components/Layout.tsx`**
   - Accept `usageInfo` prop
   - Show tier badge (FREE / PRO) in sidebar user section
   - Show usage bar: `{count}/{limit} generations today` with color-coded progress bar
   - Replace "Marketer Admin" label with dynamic tier
 
-- [ ] **6.2 Update `components/CampaignDetail.tsx`**
+- [x] **6.2 Update `components/CampaignDetail.tsx`**
   - Accept `usageInfo` and `onRefreshUsage` props
   - Client-side quota pre-check before generation (server also enforces)
   - Handle `resource-exhausted` error with upgrade prompt
   - Call `onRefreshUsage` after generation starts
 
-- [ ] **6.3 Create `components/Settings.tsx`**
+- [x] **6.3 Create `components/Settings.tsx`**
   - Current plan display (Free/Pro with feature comparison)
   - Usage stats with progress bar
   - "Upgrade to Pro" button for free users → calls `openCheckout()`
   - "Manage Billing" button for pro users → calls `openBillingPortal()`
   - Handle `?billing=success` and `?billing=canceled` URL params (post-redirect toast)
 
-- [ ] **6.4 Register Settings route in `App.tsx`**
+- [x] **6.4 Register Settings route in `App.tsx`**
   - Add `<Route path="/settings">` (sidebar link already exists at `/settings`)
 
 ### Phase 7: Stripe CLI Setup & Products
