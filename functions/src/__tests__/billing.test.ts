@@ -34,10 +34,13 @@ const mockUsageCollectionRef = {
   doc: vi.fn().mockReturnValue(mockUsageDocRef),
 };
 
+const mockCreate = vi.fn().mockResolvedValue(undefined);
+
 // Make doc() return an object that also has .collection() for subcollections
 const mockDocWithSubcollection: any = {
   get: mockGet,
   set: mockSet,
+  create: mockCreate,
   update: mockUpdateFn,
   collection: vi.fn().mockReturnValue(mockUsageCollectionRef),
 };
@@ -101,6 +104,8 @@ describe("Billing Utils", () => {
         tier: "pro",
         stripeCustomerId: "cus_123",
       };
+      // create() throws ALREADY_EXISTS, then get() returns existing profile
+      mockCreate.mockRejectedValueOnce({ code: 6 });
       mockDocWithSubcollection.get.mockResolvedValueOnce({
         exists: true,
         data: () => existingProfile,
@@ -108,7 +113,6 @@ describe("Billing Utils", () => {
 
       const result = await getOrCreateUserProfile("user-1", "test@example.com", "Test User");
       expect(result).toEqual(existingProfile);
-      expect(mockDocWithSubcollection.set).not.toHaveBeenCalled();
     });
 
     it("creates new free-tier profile when user doc does not exist", async () => {
@@ -121,24 +125,21 @@ describe("Billing Utils", () => {
         updatedAt: "SERVER_TIMESTAMP",
       };
 
-      // First get: doesn't exist
-      mockDocWithSubcollection.get
-        .mockResolvedValueOnce({ exists: false })
-        // Second get after set: returns created doc
-        .mockResolvedValueOnce({
-          exists: true,
-          data: () => newProfile,
-        });
+      // create() succeeds, then get() returns created doc
+      mockCreate.mockResolvedValueOnce(undefined);
+      mockDocWithSubcollection.get.mockResolvedValueOnce({
+        exists: true,
+        data: () => newProfile,
+      });
 
       const result = await getOrCreateUserProfile("user-2", "new@example.com", "New User");
-      expect(mockDocWithSubcollection.set).toHaveBeenCalledWith(
+      expect(mockCreate).toHaveBeenCalledWith(
         expect.objectContaining({
           uid: "user-2",
           email: "new@example.com",
           displayName: "New User",
           tier: "free",
-        }),
-        { merge: true }
+        })
       );
       expect(result.tier).toBe("free");
       expect(result.uid).toBe("user-2");

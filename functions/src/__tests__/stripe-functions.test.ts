@@ -34,9 +34,12 @@ const mockUsageCollectionRef = {
   doc: vi.fn().mockReturnValue(mockUsageDocRef),
 };
 
+const mockCreate = vi.fn().mockResolvedValue(undefined);
+
 const mockDocWithSubcollection: any = {
   get: mockGet,
   set: mockSet,
+  create: mockCreate,
   update: mockUpdateFn,
   collection: vi.fn().mockReturnValue(mockUsageCollectionRef),
 };
@@ -212,6 +215,8 @@ describe("createCheckoutSession", () => {
 
   it("creates new Stripe customer when user has no customerId", async () => {
     // getOrCreateUserProfile: existing user without stripeCustomerId
+    // create() throws ALREADY_EXISTS, then get() returns profile
+    mockCreate.mockRejectedValueOnce({ code: 6 });
     mockGet
       .mockResolvedValueOnce({
         exists: true,
@@ -240,6 +245,8 @@ describe("createCheckoutSession", () => {
   });
 
   it("reuses existing Stripe customer", async () => {
+    // getOrCreateUserProfile: create() throws ALREADY_EXISTS, get() returns existing profile
+    mockCreate.mockRejectedValueOnce({ code: 6 });
     mockGet.mockResolvedValueOnce({
       exists: true,
       data: () => ({
@@ -266,6 +273,8 @@ describe("createCheckoutSession", () => {
   });
 
   it("uses monthly price by default", async () => {
+    // getOrCreateUserProfile: create() throws ALREADY_EXISTS, get() returns existing profile
+    mockCreate.mockRejectedValueOnce({ code: 6 });
     mockGet.mockResolvedValueOnce({
       exists: true,
       data: () => ({
@@ -288,6 +297,8 @@ describe("createCheckoutSession", () => {
   });
 
   it("uses yearly price when interval is yearly", async () => {
+    // getOrCreateUserProfile: create() throws ALREADY_EXISTS, get() returns existing profile
+    mockCreate.mockRejectedValueOnce({ code: 6 });
     mockGet.mockResolvedValueOnce({
       exists: true,
       data: () => ({

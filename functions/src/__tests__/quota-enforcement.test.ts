@@ -15,9 +15,12 @@ const mockUsageCollectionRef = {
   doc: vi.fn().mockReturnValue(mockUsageDocRef),
 };
 
+const mockCreate = vi.fn().mockResolvedValue(undefined);
+
 const mockDocWithSubcollection: any = {
   get: mockGet,
   set: mockSet,
+  create: mockCreate,
   update: mockUpdateFn,
   collection: vi.fn().mockReturnValue(mockUsageCollectionRef),
 };
@@ -214,16 +217,15 @@ describe("enforceQuotaAndIncrement integration pattern", () => {
   });
 
   it("creates profile then atomically checks+increments quota", async () => {
-    // getOrCreateUserProfile: user doesn't exist
-    mockGet
-      .mockResolvedValueOnce({ exists: false })
-      .mockResolvedValueOnce({
-        exists: true,
-        data: () => ({ uid: "user-1", email: "a@b.com", displayName: "Test", tier: "free" }),
-      });
+    // getOrCreateUserProfile: user doesn't exist, create() succeeds, then get()
+    mockCreate.mockResolvedValueOnce(undefined);
+    mockGet.mockResolvedValueOnce({
+      exists: true,
+      data: () => ({ uid: "user-1", email: "a@b.com", displayName: "Test", tier: "free" }),
+    });
 
     await getOrCreateUserProfile("user-1", "a@b.com", "Test");
-    expect(mockSet).toHaveBeenCalled();
+    expect(mockCreate).toHaveBeenCalled();
 
     // Now checkAndIncrementQuota (transactional)
     mockTxGet

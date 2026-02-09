@@ -539,8 +539,8 @@ const STRIPE_PRICE_YEARLY = "price_pro_yearly_290";
 const getStripe = () => new Stripe(STRIPE_SECRET_KEY.value());
 
 // Validate returnUrl to prevent open redirect attacks.
-// Only allows https:// URLs (or http://localhost for dev) with no credentials.
-function validateReturnUrl(url: string): string {
+// Only allows same-origin URLs or localhost for dev.
+function validateReturnUrl(url: string, requestOrigin?: string): string {
   let parsed: URL;
   try {
     parsed = new URL(url);
@@ -553,6 +553,18 @@ function validateReturnUrl(url: string): string {
   }
   if (parsed.username || parsed.password) {
     throw new HttpsError("invalid-argument", "returnUrl must not contain credentials.");
+  }
+  // Restrict to same origin to prevent open redirects
+  if (requestOrigin) {
+    try {
+      const originParsed = new URL(requestOrigin);
+      if (parsed.origin !== originParsed.origin) {
+        throw new HttpsError("invalid-argument", "returnUrl must match the request origin.");
+      }
+    } catch (e) {
+      if (e instanceof HttpsError) throw e;
+      // If origin header can't be parsed, fall through to localhost check
+    }
   }
   return url;
 }
@@ -594,7 +606,8 @@ export const createCheckoutSession = onCall(
     if (!returnUrl) {
       throw new HttpsError("invalid-argument", "returnUrl is required.");
     }
-    const baseReturnUrl = validateReturnUrl(returnUrl);
+    const origin = request.rawRequest?.headers?.origin as string | undefined;
+    const baseReturnUrl = validateReturnUrl(returnUrl, origin);
 
     const session = await stripe.checkout.sessions.create({
       customer: customerId,
@@ -629,7 +642,8 @@ export const createPortalSession = onCall(
     if (!returnUrl) {
       throw new HttpsError("invalid-argument", "returnUrl is required.");
     }
-    const baseReturnUrl = validateReturnUrl(returnUrl);
+    const origin = request.rawRequest?.headers?.origin as string | undefined;
+    const baseReturnUrl = validateReturnUrl(returnUrl, origin);
 
     const stripe = getStripe();
     const session = await stripe.billingPortal.sessions.create({
@@ -652,7 +666,11 @@ export const stripeWebhook = onRequest(
     }
 
     const stripe = getStripe();
-    const sig = req.headers["stripe-signature"] as string;
+    const sig = req.headers["stripe-signature"];
+    if (!sig) {
+      res.status(400).send("Missing stripe-signature header.");
+      return;
+    }
 
     let event: Stripe.Event;
     try {
@@ -684,13 +702,22 @@ export const stripeWebhook = onRequest(
       throw err;
     }
 
+    // Safely extract a string customer ID from Stripe objects (can be string or expanded object)
+    const getCustomerId = (customer: string | Stripe.Customer | Stripe.DeletedCustomer | null): string | null =>
+      typeof customer === "string" ? customer : customer?.id ?? null;
+
     try {
       switch (event.type) {
         case "checkout.session.completed": {
           const session = event.data.object as Stripe.Checkout.Session;
-          const customerId = session.customer as string;
-          const subscriptionId = session.subscription as string;
+          const customerId = getCustomerId(session.customer);
+          const subscriptionId = typeof session.subscription === "string"
+            ? session.subscription : session.subscription?.id ?? null;
 
+          if (!customerId) {
+            console.error(`checkout.session.completed: no customer ID in session`);
+            break;
+          }
           const uid = await findUidByCustomerId(customerId);
           if (uid && subscriptionId) {
             await updateUserProfile(uid, {
@@ -708,7 +735,11 @@ export const stripeWebhook = onRequest(
 
         case "customer.subscription.updated": {
           const subscription = event.data.object as Stripe.Subscription;
-          const customerId = subscription.customer as string;
+          const customerId = getCustomerId(subscription.customer);
+          if (!customerId) {
+            console.error(`customer.subscription.updated: no customer ID in subscription`);
+            break;
+          }
           const uid = await findUidByCustomerId(customerId);
 
           if (uid) {
@@ -727,7 +758,11 @@ export const stripeWebhook = onRequest(
 
         case "customer.subscription.deleted": {
           const subscription = event.data.object as Stripe.Subscription;
-          const customerId = subscription.customer as string;
+          const customerId = getCustomerId(subscription.customer);
+          if (!customerId) {
+            console.error(`customer.subscription.deleted: no customer ID in subscription`);
+            break;
+          }
           const uid = await findUidByCustomerId(customerId);
 
           if (uid) {
@@ -751,9 +786,16 @@ export const stripeWebhook = onRequest(
       }
     } catch (err: any) {
       console.error(`Error processing webhook event ${event.id}:`, err);
-      // Delete idempotency record so Stripe can retry this event
-      try { await eventRef.delete(); } catch (delErr) {
-        console.error(`Failed to delete idempotency record for ${event.id}:`, delErr);
+      // Mark the idempotency record as failed instead of deleting it.
+      // This prevents infinite retry loops for permanent failures while
+      // still allowing manual investigation via the stripeEvents collection.
+      try {
+        await eventRef.update({
+          error: err.message || "Unknown error",
+          failedAt: FieldValue.serverTimestamp(),
+        });
+      } catch (updateErr) {
+        console.error(`Failed to update idempotency record for ${event.id}:`, updateErr);
       }
       res.status(500).send("Webhook processing error");
       return;

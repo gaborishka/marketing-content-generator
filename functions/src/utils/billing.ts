@@ -21,30 +21,28 @@ export async function getOrCreateUserProfile(
   displayName: string
 ): Promise<UserProfileDoc> {
   const ref = db().collection("users").doc(uid);
-  const snap = await ref.get();
 
-  if (snap.exists) {
-    return snap.data() as UserProfileDoc;
+  // Try atomic create first — fails if doc already exists, preventing
+  // race conditions that could overwrite concurrent tier updates.
+  try {
+    const now = FieldValue.serverTimestamp();
+    await ref.create({
+      uid,
+      email,
+      displayName,
+      tier: "free" as UserTier,
+      createdAt: now,
+      updatedAt: now,
+    });
+  } catch (err: any) {
+    if (err.code !== 6 /* ALREADY_EXISTS */) {
+      throw err;
+    }
+    // Document already exists — fall through to read
   }
 
-  const now = FieldValue.serverTimestamp();
-  const profile: Omit<UserProfileDoc, "createdAt" | "updatedAt"> & {
-    createdAt: FirebaseFirestore.FieldValue;
-    updatedAt: FirebaseFirestore.FieldValue;
-  } = {
-    uid,
-    email,
-    displayName,
-    tier: "free" as UserTier,
-    createdAt: now,
-    updatedAt: now,
-  };
-
-  await ref.set(profile, { merge: true });
-
-  // Re-read to get resolved timestamps
-  const created = await ref.get();
-  return created.data() as UserProfileDoc;
+  const snap = await ref.get();
+  return snap.data() as UserProfileDoc;
 }
 
 export async function getUserProfile(uid: string): Promise<UserProfileDoc | null> {
@@ -75,6 +73,8 @@ export async function getDailyUsage(uid: string): Promise<DailyUsageDoc | null> 
   return snap.data() as DailyUsageDoc;
 }
 
+// Non-transactional increment — used only for testing.
+// Production code should use checkAndIncrementQuota() instead.
 export async function incrementUsage(uid: string): Promise<number> {
   const date = todayDateString();
   const ref = db().collection("users").doc(uid).collection("usage").doc(date);
@@ -103,6 +103,8 @@ export interface QuotaResult {
   tier: UserTier;
 }
 
+// Non-transactional quota check — used only for testing.
+// Production code should use checkAndIncrementQuota() instead.
 export async function checkQuota(uid: string): Promise<QuotaResult> {
   const profile = await getUserProfile(uid);
   const tier: UserTier = profile?.tier ?? "free";
