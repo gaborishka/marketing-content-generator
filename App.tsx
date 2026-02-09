@@ -171,6 +171,9 @@ function App() {
     const unsubscribe = onAuthChange((user) => {
       setCurrentUser(user);
       setAuthLoading(false);
+      if (!user) {
+        setUsageInfo(null);
+      }
     });
     return unsubscribe;
   }, []);

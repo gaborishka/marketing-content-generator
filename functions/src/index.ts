@@ -538,6 +538,25 @@ const STRIPE_PRICE_YEARLY = "price_pro_yearly_290";
 
 const getStripe = () => new Stripe(STRIPE_SECRET_KEY.value());
 
+// Validate returnUrl to prevent open redirect attacks.
+// Only allows https:// URLs (or http://localhost for dev) with no credentials.
+function validateReturnUrl(url: string): string {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    throw new HttpsError("invalid-argument", "returnUrl must be a valid URL.");
+  }
+  const isLocalhost = parsed.hostname === "localhost" || parsed.hostname === "127.0.0.1";
+  if (parsed.protocol !== "https:" && !(isLocalhost && parsed.protocol === "http:")) {
+    throw new HttpsError("invalid-argument", "returnUrl must use HTTPS.");
+  }
+  if (parsed.username || parsed.password) {
+    throw new HttpsError("invalid-argument", "returnUrl must not contain credentials.");
+  }
+  return url;
+}
+
 // ── createCheckoutSession ─────────────────────────────────────────────────
 
 export const createCheckoutSession = onCall(
@@ -575,7 +594,7 @@ export const createCheckoutSession = onCall(
     if (!returnUrl) {
       throw new HttpsError("invalid-argument", "returnUrl is required.");
     }
-    const baseReturnUrl = returnUrl;
+    const baseReturnUrl = validateReturnUrl(returnUrl);
 
     const session = await stripe.checkout.sessions.create({
       customer: customerId,
@@ -610,7 +629,7 @@ export const createPortalSession = onCall(
     if (!returnUrl) {
       throw new HttpsError("invalid-argument", "returnUrl is required.");
     }
-    const baseReturnUrl = returnUrl;
+    const baseReturnUrl = validateReturnUrl(returnUrl);
 
     const stripe = getStripe();
     const session = await stripe.billingPortal.sessions.create({
@@ -648,20 +667,22 @@ export const stripeWebhook = onRequest(
       return;
     }
 
-    // Idempotency: skip if this event was already processed
+    // Idempotency: use create() which fails if the document already exists,
+    // preventing race conditions from concurrent webhook deliveries.
     const db = getFirestore();
     const eventRef = db.collection("stripeEvents").doc(event.id);
-    const eventDoc = await eventRef.get();
-    if (eventDoc.exists) {
-      res.status(200).json({ received: true, duplicate: true });
-      return;
+    try {
+      await eventRef.create({
+        type: event.type,
+        processedAt: FieldValue.serverTimestamp(),
+      });
+    } catch (err: any) {
+      if (err.code === 6 /* ALREADY_EXISTS */) {
+        res.status(200).json({ received: true, duplicate: true });
+        return;
+      }
+      throw err;
     }
-
-    // Mark as processing (write early for idempotency)
-    await eventRef.set({
-      type: event.type,
-      processedAt: FieldValue.serverTimestamp(),
-    });
 
     try {
       switch (event.type) {

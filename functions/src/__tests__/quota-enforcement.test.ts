@@ -27,11 +27,26 @@ const mockUsersCollectionRef: any = {
   where: vi.fn(),
 };
 
+// Transaction mock: captures reads/writes and executes the callback
+const mockTxGet = vi.fn();
+const mockTxUpdate = vi.fn();
+const mockTxSet = vi.fn();
+
+const mockRunTransaction = vi.fn(async (callback: any) => {
+  const tx = {
+    get: mockTxGet,
+    update: mockTxUpdate,
+    set: mockTxSet,
+  };
+  return callback(tx);
+});
+
 const mockFirestoreInstance = {
   collection: vi.fn((name: string) => {
     if (name === "users") return mockUsersCollectionRef;
     return { doc: vi.fn().mockReturnValue({ get: mockGet, set: mockSet }) };
   }),
+  runTransaction: mockRunTransaction,
 };
 
 vi.mock("firebase-admin/firestore", () => ({
@@ -48,127 +63,182 @@ vi.mock("firebase-functions/params", () => ({
 
 import {
   getOrCreateUserProfile,
-  checkQuota,
+  checkAndIncrementQuota,
   incrementUsage,
 } from "../utils/billing";
 import { TIER_LIMITS } from "../types/pipeline";
 
-// Replicate the enforceQuota logic from index.ts for testing
-// (since it's a private function, we test the same logic pattern)
-async function enforceQuota(uid: string, email: string, displayName: string): Promise<void> {
-  await getOrCreateUserProfile(uid, email, displayName);
-  const quota = await checkQuota(uid);
-  if (!quota.allowed) {
-    const message =
-      quota.tier === "free"
-        ? `Daily generation limit reached (${quota.current}/${quota.limit}). Upgrade to Pro for ${TIER_LIMITS.pro} generations/day.`
-        : `Daily generation limit reached (${quota.current}/${quota.limit}).`;
-    throw new Error(message);
-  }
-}
-
-describe("enforceQuota", () => {
+describe("checkAndIncrementQuota (transactional)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
-  it("allows request when under free-tier limit", async () => {
-    // getOrCreateUserProfile: existing user
-    mockGet
+  it("allows and increments when free user is under limit", async () => {
+    // Transaction reads: profile then usage
+    mockTxGet
       .mockResolvedValueOnce({
         exists: true,
-        data: () => ({ uid: "user-1", email: "a@b.com", displayName: "Test", tier: "free" }),
-      })
-      // checkQuota -> getUserProfile
-      .mockResolvedValueOnce({
-        exists: true,
-        data: () => ({ uid: "user-1", tier: "free" }),
-      });
-    // checkQuota -> getDailyUsage
-    mockUsageDocRef.get.mockResolvedValueOnce({
-      exists: true,
-      data: () => ({ generationCount: 5 }),
-    });
-
-    await expect(enforceQuota("user-1", "a@b.com", "Test")).resolves.toBeUndefined();
-  });
-
-  it("throws with upgrade message for free user at limit", async () => {
-    mockGet
-      .mockResolvedValueOnce({
-        exists: true,
-        data: () => ({ uid: "user-1", email: "a@b.com", displayName: "Test", tier: "free" }),
+        data: () => ({ tier: "free" }),
       })
       .mockResolvedValueOnce({
         exists: true,
-        data: () => ({ uid: "user-1", tier: "free" }),
+        data: () => ({ generationCount: 5 }),
       });
-    mockUsageDocRef.get.mockResolvedValueOnce({
-      exists: true,
-      data: () => ({ generationCount: 10 }),
-    });
 
-    await expect(enforceQuota("user-1", "a@b.com", "Test")).rejects.toThrow(
-      "Upgrade to Pro"
+    const result = await checkAndIncrementQuota("user-1");
+    expect(result).toEqual({
+      allowed: true,
+      current: 6,
+      limit: 10,
+      tier: "free",
+    });
+    expect(mockTxUpdate).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ generationCount: "INCREMENT_1" })
     );
   });
 
-  it("throws without upgrade message for pro user at limit", async () => {
-    mockGet
+  it("blocks when free user is at limit (no increment)", async () => {
+    mockTxGet
       .mockResolvedValueOnce({
         exists: true,
-        data: () => ({ uid: "user-1", email: "a@b.com", displayName: "Test", tier: "pro" }),
+        data: () => ({ tier: "free" }),
       })
       .mockResolvedValueOnce({
         exists: true,
-        data: () => ({ uid: "user-1", tier: "pro" }),
+        data: () => ({ generationCount: 10 }),
       });
-    mockUsageDocRef.get.mockResolvedValueOnce({
-      exists: true,
-      data: () => ({ generationCount: 100 }),
-    });
 
-    await expect(enforceQuota("user-1", "a@b.com", "Test")).rejects.toThrow(
-      /^Daily generation limit reached \(100\/100\)\.$/
-    );
+    const result = await checkAndIncrementQuota("user-1");
+    expect(result).toEqual({
+      allowed: false,
+      current: 10,
+      limit: 10,
+      tier: "free",
+    });
+    expect(mockTxUpdate).not.toHaveBeenCalled();
+    expect(mockTxSet).not.toHaveBeenCalled();
   });
 
   it("allows pro user with high usage under limit", async () => {
-    mockGet
+    mockTxGet
       .mockResolvedValueOnce({
         exists: true,
-        data: () => ({ uid: "user-1", email: "a@b.com", displayName: "Test", tier: "pro" }),
+        data: () => ({ tier: "pro" }),
       })
       .mockResolvedValueOnce({
         exists: true,
-        data: () => ({ uid: "user-1", tier: "pro" }),
+        data: () => ({ generationCount: 50 }),
       });
-    mockUsageDocRef.get.mockResolvedValueOnce({
-      exists: true,
-      data: () => ({ generationCount: 50 }),
-    });
 
-    await expect(enforceQuota("user-1", "a@b.com", "Test")).resolves.toBeUndefined();
+    const result = await checkAndIncrementQuota("user-1");
+    expect(result).toEqual({
+      allowed: true,
+      current: 51,
+      limit: 100,
+      tier: "pro",
+    });
+    expect(mockTxUpdate).toHaveBeenCalled();
   });
 
-  it("creates user profile for new user and allows generation", async () => {
-    const newProfile = {
-      uid: "new-user",
-      email: "new@b.com",
-      displayName: "New",
+  it("blocks pro user at limit", async () => {
+    mockTxGet
+      .mockResolvedValueOnce({
+        exists: true,
+        data: () => ({ tier: "pro" }),
+      })
+      .mockResolvedValueOnce({
+        exists: true,
+        data: () => ({ generationCount: 100 }),
+      });
+
+    const result = await checkAndIncrementQuota("user-1");
+    expect(result).toEqual({
+      allowed: false,
+      current: 100,
+      limit: 100,
+      tier: "pro",
+    });
+    expect(mockTxUpdate).not.toHaveBeenCalled();
+  });
+
+  it("creates usage doc via tx.set when no usage exists yet", async () => {
+    mockTxGet
+      .mockResolvedValueOnce({
+        exists: true,
+        data: () => ({ tier: "free" }),
+      })
+      .mockResolvedValueOnce({
+        exists: false,
+        data: () => undefined,
+      });
+
+    const result = await checkAndIncrementQuota("new-user");
+    expect(result).toEqual({
+      allowed: true,
+      current: 1,
+      limit: 10,
       tier: "free",
-    };
-    // getOrCreateUserProfile: doesn't exist -> create
+    });
+    expect(mockTxSet).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ generationCount: 1, uid: "new-user" })
+    );
+    expect(mockTxUpdate).not.toHaveBeenCalled();
+  });
+
+  it("defaults to free tier when profile does not exist", async () => {
+    mockTxGet
+      .mockResolvedValueOnce({
+        exists: false,
+        data: () => undefined,
+      })
+      .mockResolvedValueOnce({
+        exists: false,
+        data: () => undefined,
+      });
+
+    const result = await checkAndIncrementQuota("new-user");
+    expect(result).toEqual({
+      allowed: true,
+      current: 1,
+      limit: 10,
+      tier: "free",
+    });
+  });
+});
+
+describe("enforceQuotaAndIncrement integration pattern", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("creates profile then atomically checks+increments quota", async () => {
+    // getOrCreateUserProfile: user doesn't exist
     mockGet
       .mockResolvedValueOnce({ exists: false })
-      // re-read after set
-      .mockResolvedValueOnce({ exists: true, data: () => newProfile })
-      // checkQuota -> getUserProfile
-      .mockResolvedValueOnce({ exists: true, data: () => newProfile });
-    // checkQuota -> getDailyUsage (no usage yet)
-    mockUsageDocRef.get.mockResolvedValueOnce({ exists: false });
+      .mockResolvedValueOnce({
+        exists: true,
+        data: () => ({ uid: "user-1", email: "a@b.com", displayName: "Test", tier: "free" }),
+      });
 
-    await expect(enforceQuota("new-user", "new@b.com", "New")).resolves.toBeUndefined();
+    await getOrCreateUserProfile("user-1", "a@b.com", "Test");
+    expect(mockSet).toHaveBeenCalled();
+
+    // Now checkAndIncrementQuota (transactional)
+    mockTxGet
+      .mockResolvedValueOnce({
+        exists: true,
+        data: () => ({ tier: "free" }),
+      })
+      .mockResolvedValueOnce({
+        exists: true,
+        data: () => ({ generationCount: 5 }),
+      });
+
+    const quota = await checkAndIncrementQuota("user-1");
+    expect(quota.allowed).toBe(true);
+    expect(quota.current).toBe(6);
   });
 });
 

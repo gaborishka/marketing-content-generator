@@ -68,6 +68,7 @@ vi.mock("firebase-admin/firestore", () => ({
   FieldValue: {
     serverTimestamp: () => "SERVER_TIMESTAMP",
     increment: (n: number) => `INCREMENT_${n}`,
+    delete: () => "FIELD_DELETE",
   },
 }));
 
@@ -185,10 +186,14 @@ async function processWebhookEvent(eventType: string, eventData: any, eventId: s
       const uid = await findUidByCustomerId(customerId);
 
       if (uid) {
-        await updateUserProfile(uid, {
+        // Match production code: use direct Firestore update with FieldValue.delete()
+        const { getFirestore, FieldValue } = await import("firebase-admin/firestore");
+        const userRef = getFirestore().collection("users").doc(uid);
+        await userRef.update({
           tier: "free" as UserTier,
-          stripeSubscriptionId: undefined,
+          stripeSubscriptionId: FieldValue.delete(),
           stripeSubscriptionStatus: "canceled",
+          updatedAt: FieldValue.serverTimestamp(),
         });
       }
       break;
@@ -534,7 +539,7 @@ describe("stripeWebhook", () => {
 
       expect(mockDocWithSubcollection.update).toHaveBeenCalledWith({
         tier: "free",
-        stripeSubscriptionId: undefined,
+        stripeSubscriptionId: "FIELD_DELETE",
         stripeSubscriptionStatus: "canceled",
         updatedAt: "SERVER_TIMESTAMP",
       });
