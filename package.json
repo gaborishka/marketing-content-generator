@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "concurrently --names emu,vite --prefix-colors blue,green \"npm run emulators\" \"VITE_USE_EMULATORS=true vite\"",
-    "emulators": "cd functions && npm run build && cd .. && (export $(grep -v '^#' .env.local | grep GEMINI_API_KEY | xargs) && npx firebase emulators:start --only auth,functions,firestore)",
+    "emulators": "cd functions && npm run build && cd .. && (export $(grep -v '^#' .env.local | grep GEMINI_API_KEY | xargs) && export STORAGE_EMULATOR_HOST=127.0.0.1:9199 && npx firebase emulators:start --only auth,functions,firestore,storage)",
     "dev:vite": "vite",
     "build": "vite build",
     "preview": "vite preview",

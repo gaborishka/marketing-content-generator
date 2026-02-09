@@ -337,9 +337,16 @@ export const generateVideo = onCall(
         },
       });
 
-      // Construct Firebase download URL
+      // Construct Firebase download URL (use emulator if running in emulator mode)
       const encodedPath = encodeURIComponent(filePath);
-      const videoUrl = `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodedPath}?alt=media&token=${downloadToken}`;
+      const isUsingEmulator = !!process.env.STORAGE_EMULATOR_HOST || !!process.env.FIREBASE_STORAGE_EMULATOR_HOST;
+      let videoUrl: string;
+      if (isUsingEmulator) {
+        const emulatorHost = process.env.STORAGE_EMULATOR_HOST || process.env.FIREBASE_STORAGE_EMULATOR_HOST || '127.0.0.1:9199';
+        videoUrl = `http://${emulatorHost}/${bucket.name}/${encodedPath}?alt=media&token=${downloadToken}`;
+      } else {
+        videoUrl = `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodedPath}?alt=media&token=${downloadToken}`;
+      }
 
       return { videoUrl };
     } catch (error: any) {

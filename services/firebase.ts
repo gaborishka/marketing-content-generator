@@ -1,7 +1,7 @@
 import { initializeApp } from 'firebase/app';
 import { getFirestore, connectFirestoreEmulator } from 'firebase/firestore';
 import { getAuth, connectAuthEmulator } from 'firebase/auth';
-import { getStorage } from 'firebase/storage';
+import { getStorage, connectStorageEmulator } from 'firebase/storage';
 import { getFunctions, connectFunctionsEmulator } from 'firebase/functions';
 
 // When using emulators, use the project ID from environment variable or default
@@ -39,13 +39,17 @@ if (import.meta.env.DEV && import.meta.env.VITE_USE_EMULATORS === 'true') {
     const functionsEmulatorPort = parseInt(import.meta.env.VITE_FIREBASE_EMULATOR_FUNCTIONS_PORT || '5001', 10);
     const firestoreEmulatorHost = import.meta.env.VITE_FIREBASE_EMULATOR_FIRESTORE_HOST || '127.0.0.1';
     const firestoreEmulatorPort = parseInt(import.meta.env.VITE_FIREBASE_EMULATOR_FIRESTORE_PORT || '8080', 10);
+    const storageEmulatorHost = import.meta.env.VITE_FIREBASE_EMULATOR_STORAGE_HOST || '127.0.0.1';
+    const storageEmulatorPort = parseInt(import.meta.env.VITE_FIREBASE_EMULATOR_STORAGE_PORT || '9199', 10);
 
     connectAuthEmulator(auth, authEmulatorHost, { disableWarnings: true });
     connectFunctionsEmulator(functions, functionsEmulatorHost, functionsEmulatorPort);
     connectFirestoreEmulator(db, firestoreEmulatorHost, firestoreEmulatorPort);
+    connectStorageEmulator(storage, storageEmulatorHost, storageEmulatorPort);
     console.log('✅ Connected to Firebase emulators');
     console.log('📋 Project ID:', firebaseConfig.projectId);
     console.log('🔗 Functions URL:', `http://${functionsEmulatorHost}:${functionsEmulatorPort}/${firebaseConfig.projectId}/us-central1/`);
+    console.log('💾 Storage URL:', `http://${storageEmulatorHost}:${storageEmulatorPort}`);
   } catch (error) {
     console.warn('⚠️ Emulator connection error (may already be connected):', error);
   }

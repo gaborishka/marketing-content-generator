@@ -460,11 +460,10 @@ function App() {
         // Merge: take updated fields from the update, preserve position and other fields
         return prev.map(c => c.id === updatedItem.id ? {
           ...existing,
-          ...updatedItem, // Merge all updated fields
-          // Preserve position and canvas-specific fields
-          x: existing.x,
-          y: existing.y,
-          width: existing.width,
+          imageUrl: updatedItem.imageUrl || existing.imageUrl,
+          storyboard: updatedItem.storyboard || existing.storyboard,
+          videoUrl: updatedItem.videoUrl || existing.videoUrl,
+          videoStatus: updatedItem.videoStatus || existing.videoStatus,
         } : c);
       }
       return [...prev, updatedItem];
