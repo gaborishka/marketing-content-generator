@@ -103,8 +103,9 @@ export interface QuotaResult {
   tier: UserTier;
 }
 
-// Non-transactional quota check — used only for testing.
-// Production code should use checkAndIncrementQuota() instead.
+// Non-transactional read-only quota check (does not increment).
+// Used as a pre-check when the increment must be deferred (e.g. after
+// confirming no active job exists). Also used in tests.
 export async function checkQuota(uid: string): Promise<QuotaResult> {
   const profile = await getUserProfile(uid);
   const tier: UserTier = profile?.tier ?? "free";

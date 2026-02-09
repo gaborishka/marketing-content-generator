@@ -57,7 +57,6 @@ export const VideoStoryboardModal: React.FC<VideoStoryboardModalProps> = ({
         videoUrl,
         videoStatus: 'completed'
       });
-      onRefreshUsage?.();
     } catch (error: any) {
       console.error("Video gen failed", error);
       onUpdate({ ...content, videoStatus: 'failed' });
@@ -67,6 +66,7 @@ export const VideoStoryboardModal: React.FC<VideoStoryboardModalProps> = ({
         : `Video generation failed: ${error.message || "Unknown error"}`);
     } finally {
       setIsGeneratingVideo(false);
+      onRefreshUsage?.();
     }
   };
 

@@ -424,11 +424,17 @@ export const generateCampaignContent = onCall(
       throw new HttpsError("invalid-argument", "campaignId is required.");
     }
 
+    // Atomic quota check + increment BEFORE job creation.
+    // This must happen before createJobIfNoActive because the job doc write
+    // triggers processGenerationJob (onDocumentCreated) immediately. If we
+    // incremented after, a concurrent request could exhaust quota between
+    // the pre-check and the increment, leaving a pipeline running without
+    // a reserved quota slot.
+    await enforceQuotaAndIncrement(userId, email, displayName);
+
     const jobId = `job-${randomUUID()}`;
 
     try {
-      // Create job first — if one is already active, we reject without
-      // consuming a quota unit.
       await createJobIfNoActive(jobId, {
         userId,
         campaignId,
@@ -447,9 +453,6 @@ export const generateCampaignContent = onCall(
       console.error("generateCampaignContent error:", error);
       throw new HttpsError("internal", error.message || "Failed to create generation job.");
     }
-
-    // Only consume quota after confirming no active job exists.
-    await enforceQuotaAndIncrement(userId, email, displayName);
 
     return { jobId };
   }
@@ -588,19 +591,40 @@ export const createCheckoutSession = onCall(
     const email = request.auth.token.email || "";
     const displayName = request.auth.token.name || "";
 
-    const profile = await getOrCreateUserProfile(uid, email, displayName);
+    await getOrCreateUserProfile(uid, email, displayName);
     const stripe = getStripe();
 
-    // Reuse existing Stripe customer or create a new one
-    let customerId = profile.stripeCustomerId;
+    // Reuse existing Stripe customer or create a new one.
+    // Stripe customer creation is done OUTSIDE the transaction to avoid
+    // orphan customers if the transaction retries due to contention.
+    const userRef = getFirestore().collection("users").doc(uid);
+
+    // Fast path: check if customer already exists (no transaction needed)
+    const existingSnap = await userRef.get();
+    let customerId = existingSnap.data()?.stripeCustomerId as string | undefined;
+
     if (!customerId) {
+      // Create Stripe customer outside the transaction (idempotent-safe:
+      // worst case we create one extra customer but never use it).
       const customer = await stripe.customers.create({
         email,
         name: displayName,
         metadata: { firebaseUid: uid },
       });
-      customerId = customer.id;
-      await updateUserProfile(uid, { stripeCustomerId: customerId });
+
+      // Use a transaction to write the customer ID only if another call
+      // didn't already set one (prevents overwriting a concurrent winner).
+      customerId = await getFirestore().runTransaction(async (tx) => {
+        const snap = await tx.get(userRef);
+        const existingId = snap.data()?.stripeCustomerId;
+        if (existingId) return existingId as string;
+
+        tx.update(userRef, {
+          stripeCustomerId: customer.id,
+          updatedAt: FieldValue.serverTimestamp(),
+        });
+        return customer.id;
+      });
     }
 
     // Determine which price to use (default: monthly)

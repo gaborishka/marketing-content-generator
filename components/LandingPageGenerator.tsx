@@ -96,7 +96,6 @@ export const LandingPageGenerator: React.FC<LandingPageGeneratorProps> = ({ land
         setPhase('chat');
         saveProject(allMessages, response.html, text);
       }
-      onRefreshUsage?.();
     } catch (error: any) {
       console.error('Interview fetch error:', error);
       const isQuotaError = error?.code === 'functions/resource-exhausted';
@@ -108,6 +107,7 @@ export const LandingPageGenerator: React.FC<LandingPageGeneratorProps> = ({ land
       setPhase('chat');
     } finally {
       setIsLoading(false);
+      onRefreshUsage?.();
     }
   };
 
@@ -142,7 +142,6 @@ export const LandingPageGenerator: React.FC<LandingPageGeneratorProps> = ({ land
 
       if (response.html) setCurrentHtml(response.html);
       saveProject(allMessages, response.html, initialDescription);
-      onRefreshUsage?.();
     } catch (error: any) {
       console.error('Generation error:', error);
       const isQuotaError = error?.code === 'functions/resource-exhausted';
@@ -153,6 +152,7 @@ export const LandingPageGenerator: React.FC<LandingPageGeneratorProps> = ({ land
       setMessages([userMsg, errorMsg]);
     } finally {
       setIsLoading(false);
+      onRefreshUsage?.();
     }
   };
 
@@ -180,7 +180,6 @@ export const LandingPageGenerator: React.FC<LandingPageGeneratorProps> = ({ land
       if (response.html) setCurrentHtml(response.html);
 
       saveProject(allMessages, newHtml, undefined);
-      onRefreshUsage?.();
     } catch (error: any) {
       console.error('Refinement error:', error);
       const isQuotaError = error?.code === 'functions/resource-exhausted';
@@ -191,6 +190,7 @@ export const LandingPageGenerator: React.FC<LandingPageGeneratorProps> = ({ land
       setMessages((prev) => [...prev, errorMsg]);
     } finally {
       setIsLoading(false);
+      onRefreshUsage?.();
     }
   };
 
