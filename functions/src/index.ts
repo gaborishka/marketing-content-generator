@@ -13,6 +13,7 @@ import { GEMINI_API_KEY } from "./utils/gemini";
 import {
   getOrCreateUserProfile,
   checkAndIncrementQuota,
+  decrementUsage,
   getDailyUsage,
   getUserProfile,
   updateUserProfile,
@@ -447,6 +448,9 @@ export const generateCampaignContent = onCall(
         retryCount: 0,
       });
     } catch (error: any) {
+      // Refund the quota slot since no generation work will be performed.
+      try { await decrementUsage(userId); } catch { /* best-effort refund */ }
+
       if (error.message === "ACTIVE_JOB_EXISTS") {
         throw new HttpsError("already-exists", "A generation job is already running for this campaign.");
       }
@@ -591,7 +595,13 @@ export const createCheckoutSession = onCall(
     const email = request.auth.token.email || "";
     const displayName = request.auth.token.name || "";
 
-    await getOrCreateUserProfile(uid, email, displayName);
+    const profile = await getOrCreateUserProfile(uid, email, displayName);
+
+    // Prevent duplicate subscriptions for users who are already Pro
+    if (profile.tier === "pro" && profile.stripeSubscriptionStatus === "active") {
+      throw new HttpsError("already-exists", "You already have an active Pro subscription.");
+    }
+
     const stripe = getStripe();
 
     // Reuse existing Stripe customer or create a new one.
@@ -776,7 +786,9 @@ export const stripeWebhook = onRequest(
 
           if (uid) {
             const status = subscription.status;
-            const tier: UserTier = (status === "active" || status === "trialing") ? "pro" : "free";
+            // Keep pro access during payment retry (past_due) to avoid
+            // cutting off users for a single failed charge.
+            const tier: UserTier = (status === "active" || status === "trialing" || status === "past_due") ? "pro" : "free";
             await updateUserProfile(uid, {
               tier,
               stripeSubscriptionId: subscription.id,

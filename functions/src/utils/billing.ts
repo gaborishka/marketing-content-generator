@@ -73,6 +73,17 @@ export async function getDailyUsage(uid: string): Promise<DailyUsageDoc | null> 
   return snap.data() as DailyUsageDoc;
 }
 
+// Compensating decrement — used to refund a quota slot when generation
+// fails for a non-quota reason (e.g. active job already exists).
+export async function decrementUsage(uid: string): Promise<void> {
+  const date = todayDateString();
+  const ref = db().collection("users").doc(uid).collection("usage").doc(date);
+  await ref.update({
+    generationCount: FieldValue.increment(-1),
+    updatedAt: FieldValue.serverTimestamp(),
+  });
+}
+
 // Non-transactional increment — used only for testing.
 // Production code should use checkAndIncrementQuota() instead.
 export async function incrementUsage(uid: string): Promise<number> {
