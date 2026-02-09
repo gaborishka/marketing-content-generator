@@ -20,7 +20,10 @@ service cloud.firestore {
       allow delete: if request.auth != null && resource.exists && resource.data.userId == request.auth.uid;
     }
     match /content/{id} {
-      allow read: if request.auth != null && resource.data.userId == request.auth.uid;
+      // Allow read if authenticated and (document doesn't exist OR user owns it)
+      // When document doesn't exist, getDoc() will return null, which is fine
+      allow read: if request.auth != null 
+                  && (resource == null || !resource.exists || resource.data.userId == request.auth.uid);
       allow create: if request.auth != null && request.resource.data.userId == request.auth.uid;
       allow update: if request.auth != null
                     && (!resource.exists || resource.data.userId == request.auth.uid)
